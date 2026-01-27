@@ -1,20 +1,22 @@
-const mongoose = require("mongoose");
+import mongoose from "mongoose";
 
 const UserSchema = new mongoose.Schema({
-  name: String,
-  email: { type: String, unique: true },
-  password: String,
-
-  primaryLanguageToLearn: String,
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true, lowercase: true },
+  password: { type: String, required: true },
+  primaryLanguageToLearn: { type: String, required: true },
   secondaryLanguageToLearn: String,
-  languagesKnow: [{ language: String, fluency: String }],
-  primaryRole: String,
-
-  state: String,
-  country: String,
-  emailUpdates: Boolean,
-
+  languagesKnow: [
+    {
+      language: { type: String, required: true },
+      fluency: { type: String, required: true }
+    }
+  ],
+  primaryRole: { type: String, enum: ["learner", "teacher"], default: "learner" },
+  state: { type: String, required: true },
+  country: { type: String, default: "India" },
+  emailUpdates: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now }
 });
 
-module.exports = mongoose.model("User", UserSchema);
+export default mongoose.model("User", UserSchema);
