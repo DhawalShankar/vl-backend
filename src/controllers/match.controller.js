@@ -1,6 +1,8 @@
 import User from "../models/User.js";
 import Match from "../models/Match.js";
 import Chat from "../models/Chat.js";
+import Notification from "../models/Notification.js";
+import { emitToUser } from "../socket.js";
 
 export const getPotentialMatches = async (req, res) => {
   try {
@@ -78,27 +80,33 @@ export const handleSwipe = async (req, res) => {
     const match = await Match.create({
       user1: smallerId,
       user2: largerId,
-      status: action === 'like' ? 'matched' : 'rejected',
+      status: action === 'like' ? 'pending' : 'rejected',
       initiatedBy: userId
     });
 
-    // If it's a like, create a chat
+    // If it's a like, create notification for target user
     if (action === 'like') {
-      const existingChat = await Chat.findOne({
-        participants: { $all: [userId, targetUserId] }
+      const sender = await User.findById(userId).select('name languagesKnow primaryLanguageToLearn');
+      
+      const notification = await Notification.create({
+        recipient: targetUserId,
+        sender: userId,
+        type: 'match_request',
+        matchId: match._id
       });
 
-      if (!existingChat) {
-        await Chat.create({
-          participants: [userId, targetUserId],
-          messages: []
-        });
-      }
+      // Emit notification via Socket.IO (optional - for real-time notification bell)
+      emitToUser(targetUserId, 'new_notification', {
+        notification: {
+          ...notification.toObject(),
+          sender: sender
+        }
+      });
 
       return res.json({ 
-        message: "Match created!", 
-        matched: true,
-        chatId: existingChat?._id
+        message: "Match request sent!", 
+        matched: false,
+        status: 'pending'
       });
     }
 
@@ -132,5 +140,118 @@ export const getMyMatches = async (req, res) => {
   } catch (error) {
     console.error("Get my matches error:", error);
     res.status(500).json({ error: "Failed to fetch matches" });
+  }
+};
+
+export const acceptMatch = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { matchId } = req.params;
+
+    const match = await Match.findById(matchId);
+
+    if (!match) {
+      return res.status(404).json({ error: "Match not found" });
+    }
+
+    // Check if user is part of this match
+    if (match.user1.toString() !== userId && match.user2.toString() !== userId) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    // Check if user is the one who received the request
+    if (match.initiatedBy.toString() === userId) {
+      return res.status(400).json({ error: "Cannot accept your own match request" });
+    }
+
+    // Update match status
+    match.status = 'matched';
+    match.acceptedBy = userId;
+    await match.save();
+
+    // Create chat between users
+    const existingChat = await Chat.findOne({
+      participants: { $all: [match.user1, match.user2] }
+    });
+
+    let chatId;
+    if (!existingChat) {
+      const newChat = await Chat.create({
+        participants: [match.user1, match.user2],
+        messages: []
+      });
+      chatId = newChat._id;
+    } else {
+      chatId = existingChat._id;
+    }
+
+    // Create notification for the initiator
+    await Notification.create({
+      recipient: match.initiatedBy,
+      sender: userId,
+      type: 'match_accepted',
+      matchId: match._id
+    });
+
+    // Emit notification
+    const acceptor = await User.findById(userId).select('name');
+    emitToUser(match.initiatedBy.toString(), 'match_accepted', {
+      matchId: match._id,
+      chatId,
+      acceptedBy: acceptor
+    });
+
+    // Delete the match request notification
+    await Notification.deleteMany({
+      matchId: match._id,
+      type: 'match_request'
+    });
+
+    res.json({ 
+      message: "Match accepted!", 
+      matched: true,
+      chatId
+    });
+  } catch (error) {
+    console.error("Accept match error:", error);
+    res.status(500).json({ error: "Failed to accept match" });
+  }
+};
+
+export const rejectMatch = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { matchId } = req.params;
+
+    const match = await Match.findById(matchId);
+
+    if (!match) {
+      return res.status(404).json({ error: "Match not found" });
+    }
+
+    // Check if user is part of this match
+    if (match.user1.toString() !== userId && match.user2.toString() !== userId) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    // Check if user is the one who received the request
+    if (match.initiatedBy.toString() === userId) {
+      return res.status(400).json({ error: "Cannot reject your own match request" });
+    }
+
+    // Update match status
+    match.status = 'rejected';
+    await match.save();
+
+    // Delete the notification
+    await Notification.deleteMany({
+      matchId: match._id,
+      type: 'match_request'
+    });
+
+    res.json({ message: "Match rejected" });
+  } catch (error) {
+    console.error("Reject match error:", error);
+    res.status(500).json({ error: "Failed to reject match" });
   }
 };

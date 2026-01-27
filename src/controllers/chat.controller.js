@@ -1,6 +1,7 @@
 import Chat from "../models/Chat.js";
 import User from "../models/User.js";
 import nodemailer from "nodemailer";
+import { getIO } from "../socket.js";
 
 export const getMyChats = async (req, res) => {
   try {
@@ -53,12 +54,21 @@ export const getChatMessages = async (req, res) => {
     }
 
     // Mark messages as read
+    let markedAsRead = false;
     chat.messages.forEach(msg => {
       if (msg.sender.toString() !== userId && !msg.read) {
         msg.read = true;
+        markedAsRead = true;
       }
     });
-    await chat.save();
+    
+    if (markedAsRead) {
+      await chat.save();
+      
+      // Emit read receipt via Socket.IO
+      const io = getIO();
+      io.to(chatId).emit("messages_read", { userId, chatId });
+    }
 
     const otherUser = chat.participants.find(p => p._id.toString() !== userId);
 
@@ -89,7 +99,7 @@ export const sendMessage = async (req, res) => {
     const chat = await Chat.findOne({
       _id: chatId,
       participants: userId
-    });
+    }).populate('participants', '-password');
 
     if (!chat) {
       return res.status(404).json({ error: "Chat not found" });
@@ -100,18 +110,37 @@ export const sendMessage = async (req, res) => {
       return res.status(403).json({ error: "Cannot send message - chat is blocked" });
     }
 
-    chat.messages.push({
+    const newMessage = {
       sender: userId,
       text: text.trim(),
       timestamp: new Date(),
       read: false
-    });
+    };
+
+    chat.messages.push(newMessage);
     chat.lastMessage = new Date();
     await chat.save();
 
+    const messageData = chat.messages[chat.messages.length - 1];
+
+    // Emit message via Socket.IO to other users in the chat
+    const io = getIO();
+    const otherUser = chat.participants.find(p => p._id.toString() !== userId);
+    
+    io.to(chatId).emit("receive_message", {
+      chatId,
+      message: {
+        ...messageData.toObject(),
+        sender: {
+          _id: userId,
+          name: req.user.name // You'll need to add this to req.user in auth middleware
+        }
+      }
+    });
+
     res.json({ 
       message: "Message sent",
-      messageData: chat.messages[chat.messages.length - 1]
+      messageData: messageData
     });
   } catch (error) {
     console.error("Send message error:", error);
@@ -138,6 +167,10 @@ export const blockUser = async (req, res) => {
       await chat.save();
     }
 
+    // Notify via Socket.IO
+    const io = getIO();
+    io.to(chatId).emit("user_blocked", { chatId, blockedBy: userId });
+
     res.json({ message: "User blocked successfully" });
   } catch (error) {
     console.error("Block user error:", error);
@@ -158,6 +191,10 @@ export const unblockUser = async (req, res) => {
 
     chat.blockedBy = chat.blockedBy.filter(id => id.toString() !== userId);
     await chat.save();
+
+    // Notify via Socket.IO
+    const io = getIO();
+    io.to(chatId).emit("user_unblocked", { chatId, unblockedBy: userId });
 
     res.json({ message: "User unblocked successfully" });
   } catch (error) {

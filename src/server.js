@@ -2,17 +2,26 @@ import dotenv from "dotenv";
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
+import http from "http";
+import { initializeSocket } from "./socket.js";
 import matchRoutes from "./routes/match.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
+import authRoutes from "./routes/auth.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
+
 dotenv.config();
 
 const app = express();
+const server = http.createServer(app);
+
+// Initialize Socket.IO
+initializeSocket(server);
 
 const allowedOrigins = [
   "http://localhost:3000",
   "https://vartalang.vercel.app",
   "https://vartalang.in",
-  "https://www.vartalang.in" // Add your Vercel domain if deployed there
+  "https://www.vartalang.in"
 ];
 
 app.use(
@@ -37,10 +46,10 @@ mongoose
   .catch((err) => console.error("❌ MongoDB connection error:", err));
 
 // Routes
-import authRoutes from "./routes/auth.routes.js";
 app.use("/auth", authRoutes);
 app.use("/matches", matchRoutes);
 app.use("/chats", chatRoutes);
+app.use("/notifications", notificationRoutes);
 
 // Health check endpoint
 app.get("/", (req, res) => {
@@ -55,6 +64,7 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 4000;
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`🚀 Backend running on port ${PORT}`);
+  console.log(`🔌 Socket.IO ready for connections`);
 });
