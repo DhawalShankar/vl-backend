@@ -38,6 +38,85 @@ export const getMyChats = async (req, res) => {
   }
 };
 
+export const sendMessage = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { chatId } = req.params;
+    const { text } = req.body;
+
+    if (!text || !text.trim()) {
+      return res.status(400).json({ error: "Message cannot be empty" });
+    }
+
+    const chat = await Chat.findOne({
+      _id: chatId,
+      participants: userId
+    }).populate('participants', 'name email');
+
+    if (!chat) {
+      return res.status(404).json({ error: "Chat not found" });
+    }
+
+    // Check if user is blocked
+    if (chat.blockedBy.length > 0) {
+      return res.status(403).json({ error: "Cannot send message - chat is blocked" });
+    }
+
+    // Create the message
+    const newMessage = {
+      sender: userId, // ✅ Store as ObjectId
+      text: text.trim(),
+      timestamp: new Date(),
+      read: false
+    };
+
+    chat.messages.push(newMessage);
+    chat.lastMessage = new Date();
+    await chat.save();
+
+    // Get the saved message with its _id
+    const savedMessage = chat.messages[chat.messages.length - 1];
+    
+    // Get sender info
+    const sender = chat.participants.find(p => p._id.toString() === userId);
+
+    // ✅ CRITICAL: Convert sender ObjectId to string for frontend
+    const messageData = {
+      _id: savedMessage._id.toString(),
+      sender: savedMessage.sender.toString(), // ✅ Convert to string
+      senderName: sender?.name || 'User',
+      text: savedMessage.text,
+      timestamp: savedMessage.timestamp,
+      read: savedMessage.read
+    };
+
+    // Emit message via Socket.IO to the chat room
+    try {
+      const io = getIO();
+      
+      // ✅ Emit immediately - no delay
+      io.to(chatId).emit("receive_message", {
+        chatId,
+        message: messageData
+      });
+      
+      console.log(`✅ Message emitted to chat ${chatId}:`, messageData);
+    } catch (socketError) {
+      console.error("Socket.io error:", socketError);
+    }
+
+    // Return message data to sender
+    res.json({ 
+      message: "Message sent",
+      messageData
+    });
+  } catch (error) {
+    console.error("Send message error:", error);
+    res.status(500).json({ error: "Failed to send message" });
+  }
+};
+
+// ✅ Also fix getChatMessages to return sender as string
 export const getChatMessages = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -68,17 +147,17 @@ export const getChatMessages = async (req, res) => {
     if (markedAsRead) {
       await chat.save();
       
-      // Emit read receipt via Socket.IO to the other user
+      // Emit read receipt via Socket.IO
       try {
         const io = getIO();
-        emitToChat(chatId, "messages_read", { 
+        io.to(chatId).emit("messages_read", { 
           userId, 
           chatId,
           messageIds: messagesToMarkRead,
           readBy: userId 
         });
         
-        console.log(`✅ Marked ${messagesToMarkRead.length} messages as read in chat ${chatId}`);
+        console.log(`✅ Marked ${messagesToMarkRead.length} messages as read`);
       } catch (socketError) {
         console.log("Socket.io not available for read receipts");
       }
@@ -86,11 +165,20 @@ export const getChatMessages = async (req, res) => {
 
     const otherUser = chat.participants.find(p => p._id.toString() !== userId);
 
+    // ✅ Convert sender ObjectIds to strings
+    const formattedMessages = chat.messages.map(msg => ({
+      _id: msg._id.toString(),
+      sender: msg.sender.toString(), // ✅ Convert to string
+      text: msg.text,
+      timestamp: msg.timestamp,
+      read: msg.read
+    }));
+
     res.json({ 
       chat: {
         id: chat._id,
         user: otherUser,
-        messages: chat.messages,
+        messages: formattedMessages, // ✅ Use formatted messages
         isBlocked: chat.blockedBy.includes(userId)
       }
     });
@@ -99,84 +187,6 @@ export const getChatMessages = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch messages" });
   }
 };
-
-export const sendMessage = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const { chatId } = req.params;
-    const { text } = req.body;
-
-    if (!text || !text.trim()) {
-      return res.status(400).json({ error: "Message cannot be empty" });
-    }
-
-    const chat = await Chat.findOne({
-      _id: chatId,
-      participants: userId
-    }).populate('participants', 'name email');
-
-    if (!chat) {
-      return res.status(404).json({ error: "Chat not found" });
-    }
-
-    // Check if user is blocked
-    if (chat.blockedBy.length > 0) {
-      return res.status(403).json({ error: "Cannot send message - chat is blocked" });
-    }
-
-    // Create the message
-    const newMessage = {
-      sender: userId,
-      text: text.trim(),
-      timestamp: new Date(),
-      read: false
-    };
-
-    chat.messages.push(newMessage);
-    chat.lastMessage = new Date();
-    await chat.save();
-
-    // Get the saved message with its _id
-    const savedMessage = chat.messages[chat.messages.length - 1];
-    
-    // Get sender info
-    const sender = chat.participants.find(p => p._id.toString() === userId);
-
-    // Emit message via Socket.IO to the chat room
-    try {
-      const io = getIO();
-      emitToChat(chatId, "receive_message", {
-        chatId,
-        message: {
-          _id: savedMessage._id,
-          sender: userId,
-          senderName: sender?.name || 'User',
-          text: savedMessage.text,
-          timestamp: savedMessage.timestamp,
-          read: savedMessage.read
-        }
-      });
-      console.log(`✅ Message sent via Socket.IO to chat ${chatId}`);
-    } catch (socketError) {
-      console.log("Socket.io not available, message saved to DB only");
-    }
-
-    res.json({ 
-      message: "Message sent",
-      messageData: {
-        _id: savedMessage._id,
-        sender: userId,
-        text: savedMessage.text,
-        timestamp: savedMessage.timestamp,
-        read: savedMessage.read
-      }
-    });
-  } catch (error) {
-    console.error("Send message error:", error);
-    res.status(500).json({ error: "Failed to send message" });
-  }
-};
-
 export const blockUser = async (req, res) => {
   try {
     const userId = req.user.userId;
