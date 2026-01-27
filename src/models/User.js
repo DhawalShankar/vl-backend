@@ -16,7 +16,13 @@ const UserSchema = new mongoose.Schema({
   state: { type: String, required: true },
   country: { type: String, default: "India" },
   emailUpdates: { type: Boolean, default: true },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+  bio: String,
+  city: String,
+  profilePhoto: String,
+  totalConnections: { type: Number, default: 0 },
+  coursesCompleted: { type: Number, default: 0 },
+  hoursLearned: { type: Number, default: 0 }
 });
 
 export default mongoose.model("User", UserSchema);

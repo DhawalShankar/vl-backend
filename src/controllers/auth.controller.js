@@ -113,3 +113,37 @@ export const getMe = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
+export const updateProfile = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const updates = req.body;
+
+    // Don't allow password or email updates through this endpoint
+    delete updates.password;
+    delete updates.email;
+
+    // Validate required fields if they're being updated
+    if (updates.languagesKnow && updates.languagesKnow.length === 0) {
+      return res.status(400).json({ error: "At least one language is required" });
+    }
+
+    // Update user
+    const user = await User.findByIdAndUpdate(
+      userId,
+      updates,
+      { new: true, runValidators: true }
+    ).select("-password");
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({ 
+      message: "Profile updated successfully",
+      user 
+    });
+  } catch (error) {
+    console.error("Update profile error:", error);
+    res.status(500).json({ error: "Failed to update profile" });
+  }
+};
