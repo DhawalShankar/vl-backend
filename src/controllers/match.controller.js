@@ -1,8 +1,8 @@
-import User from "../models/User.js";
 import Match from "../models/Match.js";
+import User from "../models/User.js";
 import Chat from "../models/Chat.js";
 import Notification from "../models/Notification.js";
-import { emitToUser } from "../socket.js";
+import { getIO } from "../socket.js";
 
 export const getPotentialMatches = async (req, res) => {
   try {
@@ -13,54 +13,34 @@ export const getPotentialMatches = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Get users the current user has already swiped on
+    // Find users who:
+    // 1. Want to learn what the current user knows
+    // 2. Know what the current user wants to learn
+    // 3. Are in the same state
+    // 4. Haven't been matched with already (pending/accepted/rejected)
+
+    // Get all existing match user IDs
     const existingMatches = await Match.find({
-      $or: [
-        { user1: userId },
-        { user2: userId }
-      ]
-    }).select('user1 user2');
+      $or: [{ user1: userId }, { user2: userId }]
+    });
+    
+    const matchedUserIds = existingMatches.map(match => 
+      match.user1.toString() === userId ? match.user2.toString() : match.user1.toString()
+    );
 
-    const excludedUserIds = existingMatches.flatMap(match => 
-      [match.user1.toString(), match.user2.toString()]
-    ).filter(id => id !== userId.toString());
+    const languagesIKnow = user.languagesKnow.map(l => l.language);
+    const languageIWantToLearn = user.primaryLanguageToLearn;
 
-    // Find potential matches
-    const myKnownLanguages = user.languagesKnow.map(l => l.language);
-    const myPrimaryLearning = user.primaryLanguageToLearn;
-    const mySecondaryLearning = user.secondaryLanguageToLearn;
+    const potentialMatches = await User.find({
+      _id: { $ne: userId, $nin: matchedUserIds },
+      state: user.state,
+      primaryLanguageToLearn: { $in: languagesIKnow },
+      "languagesKnow.language": languageIWantToLearn
+    }).select("-password").limit(20);
 
-    // Primary matches: Users who want to learn what I know AND know what I want to learn
-    const primaryMatches = await User.find({
-      _id: { $nin: [...excludedUserIds, userId] },
-      $or: [
-        { primaryLanguageToLearn: { $in: myKnownLanguages } },
-        { secondaryLanguageToLearn: { $in: myKnownLanguages } }
-      ],
-      'languagesKnow.language': myPrimaryLearning
-    }).select('-password').limit(10);
-
-    // Secondary matches: Users who know what I want to learn (even if not perfect match)
-    const secondaryMatches = await User.find({
-      _id: { 
-        $nin: [
-          ...excludedUserIds, 
-          userId,
-          ...primaryMatches.map(u => u._id)
-        ] 
-      },
-      'languagesKnow.language': { $in: [myPrimaryLearning, mySecondaryLearning].filter(Boolean) }
-    }).select('-password').limit(5);
-
-    // Combine and format matches
-    const allMatches = [
-      ...primaryMatches.map(u => ({ ...u.toObject(), matchType: 'primary' })),
-      ...secondaryMatches.map(u => ({ ...u.toObject(), matchType: 'secondary' }))
-    ];
-
-    res.json({ matches: allMatches });
+    res.json({ matches: potentialMatches });
   } catch (error) {
-    console.error("Get matches error:", error);
+    console.error("Get potential matches error:", error);
     res.status(500).json({ error: "Failed to fetch matches" });
   }
 };
@@ -68,54 +48,67 @@ export const getPotentialMatches = async (req, res) => {
 export const handleSwipe = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { targetUserId, action } = req.body; // action: 'like' or 'pass'
+    const { targetUserId, action } = req.body; // action: "like" or "skip"
 
-    if (!targetUserId || !action) {
-      return res.status(400).json({ error: "Missing required fields" });
+    if (action !== "like" && action !== "skip") {
+      return res.status(400).json({ error: "Invalid action" });
     }
 
-    // Create match record
-    const [smallerId, largerId] = [userId, targetUserId].sort();
-    
-    const match = await Match.create({
-      user1: smallerId,
-      user2: largerId,
-      status: action === 'like' ? 'pending' : 'rejected',
-      initiatedBy: userId
+    // Check if match already exists
+    const existingMatch = await Match.findOne({
+      $or: [
+        { user1: userId, user2: targetUserId },
+        { user1: targetUserId, user2: userId }
+      ]
     });
 
-    // If it's a like, create notification for target user
-    if (action === 'like') {
-      const sender = await User.findById(userId).select('name languagesKnow primaryLanguageToLearn');
-      
+    if (existingMatch) {
+      return res.status(400).json({ error: "Match already exists" });
+    }
+
+    if (action === "like") {
+      // Create match request
+      const match = await Match.create({
+        user1: userId,
+        user2: targetUserId,
+        status: "pending"
+      });
+
+      // Create notification for target user
       const notification = await Notification.create({
         recipient: targetUserId,
         sender: userId,
-        type: 'match_request',
+        type: "match_request",
         matchId: match._id
       });
 
-      // Emit notification via Socket.IO (optional - for real-time notification bell)
-      emitToUser(targetUserId, 'new_notification', {
-        notification: {
-          ...notification.toObject(),
-          sender: sender
-        }
-      });
+      // Populate notification before sending
+      await notification.populate('sender', 'name languagesKnow');
 
-      return res.json({ 
-        message: "Match request sent!", 
-        matched: false,
-        status: 'pending'
-      });
+      // Notify via Socket.IO
+      try {
+        const io = getIO();
+        io.emit("new_notification", {
+          userId: targetUserId,
+          notification: {
+            _id: notification._id,
+            type: notification.type,
+            sender: notification.sender,
+            matchId: match._id,
+            createdAt: notification.createdAt
+          }
+        });
+      } catch (socketError) {
+        console.log("Socket.io not available for notification");
+      }
+
+      return res.json({ message: "Match request sent", match });
     }
 
-    res.json({ message: "Passed", matched: false });
+    // For skip, just log it (optional)
+    res.json({ message: "Skipped" });
   } catch (error) {
-    if (error.code === 11000) {
-      return res.status(400).json({ error: "Already swiped on this user" });
-    }
-    console.error("Swipe error:", error);
+    console.error("Handle swipe error:", error);
     res.status(500).json({ error: "Failed to process swipe" });
   }
 };
@@ -125,18 +118,28 @@ export const getMyMatches = async (req, res) => {
     const userId = req.user.userId;
 
     const matches = await Match.find({
-      $or: [{ user1: userId }, { user2: userId }],
-      status: 'matched'
+      $or: [{ user1: userId }, { user2: userId }]
     })
     .populate('user1', '-password')
-    .populate('user2', '-password');
+    .populate('user2', '-password')
+    .sort({ createdAt: -1 });
 
-    const matchedUsers = matches.map(match => {
-      const otherUser = match.user1._id.toString() === userId ? match.user2 : match.user1;
-      return otherUser;
+    // Format matches to show the other user
+    const formattedMatches = matches.map(match => {
+      const otherUser = match.user1._id.toString() === userId 
+        ? match.user2 
+        : match.user1;
+      
+      return {
+        id: match._id,
+        user: otherUser,
+        status: match.status,
+        createdAt: match.createdAt,
+        isSender: match.user1._id.toString() === userId
+      };
     });
 
-    res.json({ matches: matchedUsers });
+    res.json({ matches: formattedMatches });
   } catch (error) {
     console.error("Get my matches error:", error);
     res.status(500).json({ error: "Failed to fetch matches" });
@@ -148,69 +151,78 @@ export const acceptMatch = async (req, res) => {
     const userId = req.user.userId;
     const { matchId } = req.params;
 
-    const match = await Match.findById(matchId);
+    const match = await Match.findOne({
+      _id: matchId,
+      user2: userId,
+      status: "pending"
+    });
 
     if (!match) {
-      return res.status(404).json({ error: "Match not found" });
-    }
-
-    // Check if user is part of this match
-    if (match.user1.toString() !== userId && match.user2.toString() !== userId) {
-      return res.status(403).json({ error: "Unauthorized" });
-    }
-
-    // Check if user is the one who received the request
-    if (match.initiatedBy.toString() === userId) {
-      return res.status(400).json({ error: "Cannot accept your own match request" });
+      return res.status(404).json({ error: "Match request not found" });
     }
 
     // Update match status
-    match.status = 'matched';
-    match.acceptedBy = userId;
+    match.status = "accepted";
     await match.save();
 
-    // Create chat between users
-    const existingChat = await Chat.findOne({
+    // Create or find existing chat
+    let chat = await Chat.findOne({
       participants: { $all: [match.user1, match.user2] }
     });
 
-    let chatId;
-    if (!existingChat) {
-      const newChat = await Chat.create({
+    if (!chat) {
+      chat = await Chat.create({
         participants: [match.user1, match.user2],
         messages: []
       });
-      chatId = newChat._id;
-    } else {
-      chatId = existingChat._id;
     }
 
-    // Create notification for the initiator
-    await Notification.create({
-      recipient: match.initiatedBy,
+    // ✅ Delete the match_request notification for recipient
+    await Notification.deleteMany({
+      recipient: userId,
+      matchId: match._id,
+      type: "match_request"
+    });
+
+    // ✅ Create acceptance notification for sender
+    const notification = await Notification.create({
+      recipient: match.user1,
       sender: userId,
-      type: 'match_accepted',
+      type: "match_accepted",
       matchId: match._id
     });
 
-    // Emit notification
-    const acceptor = await User.findById(userId).select('name');
-    emitToUser(match.initiatedBy.toString(), 'match_accepted', {
-      matchId: match._id,
-      chatId,
-      acceptedBy: acceptor
-    });
+    await notification.populate('sender', 'name languagesKnow');
 
-    // Delete the match request notification
-    await Notification.deleteMany({
-      matchId: match._id,
-      type: 'match_request'
-    });
+    // Notify via Socket.IO
+    try {
+      const io = getIO();
+      
+      // Notify sender that match was accepted
+      io.emit("match_accepted", {
+        userId: match.user1.toString(),
+        notification: {
+          _id: notification._id,
+          type: notification.type,
+          sender: notification.sender,
+          matchId: match._id,
+          createdAt: notification.createdAt
+        }
+      });
+
+      // Also emit to both users for real-time UI update
+      io.emit("new_notification", {
+        userId: match.user1.toString(),
+        notification
+      });
+    } catch (socketError) {
+      console.log("Socket.io not available for match acceptance");
+    }
 
     res.json({ 
-      message: "Match accepted!", 
-      matched: true,
-      chatId
+      message: "Match accepted", 
+      chatId: chat._id,
+      match 
     });
   } catch (error) {
     console.error("Accept match error:", error);
@@ -223,31 +235,29 @@ export const rejectMatch = async (req, res) => {
     const userId = req.user.userId;
     const { matchId } = req.params;
 
-    const match = await Match.findById(matchId);
+    const match = await Match.findOne({
+      _id: matchId,
+      user2: userId,
+      status: "pending"
+    });
 
     if (!match) {
-      return res.status(404).json({ error: "Match not found" });
-    }
-
-    // Check if user is part of this match
-    if (match.user1.toString() !== userId && match.user2.toString() !== userId) {
-      return res.status(403).json({ error: "Unauthorized" });
-    }
-
-    // Check if user is the one who received the request
-    if (match.initiatedBy.toString() === userId) {
-      return res.status(400).json({ error: "Cannot reject your own match request" });
+      return res.status(404).json({ error: "Match request not found" });
     }
 
     // Update match status
-    match.status = 'rejected';
+    match.status = "rejected";
     await match.save();
 
-    // Delete the notification
+    // ✅ Delete the match_request notification
     await Notification.deleteMany({
+      recipient: userId,
       matchId: match._id,
-      type: 'match_request'
+      type: "match_request"
     });
+
+    // Optionally notify sender (if you want)
+    // For now, just silently reject
 
     res.json({ message: "Match rejected" });
   } catch (error) {
