@@ -1,7 +1,7 @@
 import Chat from "../models/Chat.js";
 import User from "../models/User.js";
 import nodemailer from "nodemailer";
-import { getIO } from "../socket.js";
+import { getIO, emitToChat } from "../socket.js";
 
 export const getMyChats = async (req, res) => {
   try {
@@ -55,19 +55,33 @@ export const getChatMessages = async (req, res) => {
 
     // Mark messages as read
     let markedAsRead = false;
+    const messagesToMarkRead = [];
+    
     chat.messages.forEach(msg => {
       if (msg.sender.toString() !== userId && !msg.read) {
         msg.read = true;
         markedAsRead = true;
+        messagesToMarkRead.push(msg._id);
       }
     });
     
     if (markedAsRead) {
       await chat.save();
       
-      // Emit read receipt via Socket.IO
-      const io = getIO();
-      io.to(chatId).emit("messages_read", { userId, chatId });
+      // Emit read receipt via Socket.IO to the other user
+      try {
+        const io = getIO();
+        emitToChat(chatId, "messages_read", { 
+          userId, 
+          chatId,
+          messageIds: messagesToMarkRead,
+          readBy: userId 
+        });
+        
+        console.log(`✅ Marked ${messagesToMarkRead.length} messages as read in chat ${chatId}`);
+      } catch (socketError) {
+        console.log("Socket.io not available for read receipts");
+      }
     }
 
     const otherUser = chat.participants.find(p => p._id.toString() !== userId);
@@ -99,7 +113,7 @@ export const sendMessage = async (req, res) => {
     const chat = await Chat.findOne({
       _id: chatId,
       participants: userId
-    }).populate('participants', '-password');
+    }).populate('participants', 'name email');
 
     if (!chat) {
       return res.status(404).json({ error: "Chat not found" });
@@ -110,6 +124,7 @@ export const sendMessage = async (req, res) => {
       return res.status(403).json({ error: "Cannot send message - chat is blocked" });
     }
 
+    // Create the message
     const newMessage = {
       sender: userId,
       text: text.trim(),
@@ -121,26 +136,40 @@ export const sendMessage = async (req, res) => {
     chat.lastMessage = new Date();
     await chat.save();
 
-    const messageData = chat.messages[chat.messages.length - 1];
-
-    // Emit message via Socket.IO to other users in the chat
-    const io = getIO();
-    const otherUser = chat.participants.find(p => p._id.toString() !== userId);
+    // Get the saved message with its _id
+    const savedMessage = chat.messages[chat.messages.length - 1];
     
-    io.to(chatId).emit("receive_message", {
-      chatId,
-      message: {
-        ...messageData.toObject(),
-        sender: {
-          _id: userId,
-          name: req.user.name // You'll need to add this to req.user in auth middleware
+    // Get sender info
+    const sender = chat.participants.find(p => p._id.toString() === userId);
+
+    // Emit message via Socket.IO to the chat room
+    try {
+      const io = getIO();
+      emitToChat(chatId, "receive_message", {
+        chatId,
+        message: {
+          _id: savedMessage._id,
+          sender: userId,
+          senderName: sender?.name || 'User',
+          text: savedMessage.text,
+          timestamp: savedMessage.timestamp,
+          read: savedMessage.read
         }
-      }
-    });
+      });
+      console.log(`✅ Message sent via Socket.IO to chat ${chatId}`);
+    } catch (socketError) {
+      console.log("Socket.io not available, message saved to DB only");
+    }
 
     res.json({ 
       message: "Message sent",
-      messageData: messageData
+      messageData: {
+        _id: savedMessage._id,
+        sender: userId,
+        text: savedMessage.text,
+        timestamp: savedMessage.timestamp,
+        read: savedMessage.read
+      }
     });
   } catch (error) {
     console.error("Send message error:", error);
@@ -168,8 +197,12 @@ export const blockUser = async (req, res) => {
     }
 
     // Notify via Socket.IO
-    const io = getIO();
-    io.to(chatId).emit("user_blocked", { chatId, blockedBy: userId });
+    try {
+      const io = getIO();
+      emitToChat(chatId, "user_blocked", { chatId, blockedBy: userId });
+    } catch (socketError) {
+      console.log("Socket.io not available for block notification");
+    }
 
     res.json({ message: "User blocked successfully" });
   } catch (error) {
@@ -193,8 +226,12 @@ export const unblockUser = async (req, res) => {
     await chat.save();
 
     // Notify via Socket.IO
-    const io = getIO();
-    io.to(chatId).emit("user_unblocked", { chatId, unblockedBy: userId });
+    try {
+      const io = getIO();
+      emitToChat(chatId, "user_unblocked", { chatId, unblockedBy: userId });
+    } catch (socketError) {
+      console.log("Socket.io not available for unblock notification");
+    }
 
     res.json({ message: "User unblocked successfully" });
   } catch (error) {

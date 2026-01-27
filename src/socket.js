@@ -1,4 +1,5 @@
 import { Server } from "socket.io";
+import jwt from "jsonwebtoken";
 
 let io;
 
@@ -21,19 +22,51 @@ export const initializeSocket = (server) => {
   io.on("connection", (socket) => {
     console.log("✅ User connected:", socket.id);
 
-    // User joins with their userId
-    socket.on("user_online", (userId) => {
-      onlineUsers.set(userId, socket.id);
-      console.log(`User ${userId} is online`);
-      
-      // Notify user's chat partners that they're online
-      socket.broadcast.emit("user_status", { userId, status: "online" });
+    // User authentication and joining
+    socket.on("user_online", async (data) => {
+      try {
+        const { userId, token } = data;
+        
+        // Optional: Verify JWT token
+        if (token && process.env.JWT_SECRET) {
+          try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            if (decoded.userId !== userId) {
+              socket.emit("auth_error", { message: "Invalid token" });
+              return;
+            }
+          } catch (err) {
+            console.log("Token verification failed, continuing anyway");
+          }
+        }
+
+        // Store user mapping
+        onlineUsers.set(userId, socket.id);
+        socket.userId = userId; // Store on socket for easy access
+        
+        console.log(`✅ User ${userId} is online (socket: ${socket.id})`);
+        
+        // Notify all users that this user is online
+        socket.broadcast.emit("user_status", { userId, status: "online" });
+        
+        // Confirm connection to the user
+        socket.emit("connected", { userId, socketId: socket.id });
+      } catch (error) {
+        console.error("Error in user_online:", error);
+        socket.emit("error", { message: "Failed to connect" });
+      }
     });
 
     // Join a specific chat room
     socket.on("join_chat", (chatId) => {
       socket.join(chatId);
-      console.log(`Socket ${socket.id} joined chat: ${chatId}`);
+      console.log(`✅ Socket ${socket.id} (User: ${socket.userId}) joined chat: ${chatId}`);
+      
+      // Notify others in the chat that user joined
+      socket.to(chatId).emit("user_joined_chat", { 
+        chatId, 
+        userId: socket.userId 
+      });
     });
 
     // Leave a chat room
@@ -42,27 +75,14 @@ export const initializeSocket = (server) => {
       console.log(`Socket ${socket.id} left chat: ${chatId}`);
     });
 
-    // Send message to chat room
-    socket.on("send_message", (data) => {
-      const { chatId, message } = data;
-      // Broadcast to all users in that chat room except sender
-      socket.to(chatId).emit("receive_message", message);
-    });
-
     // Typing indicator
     socket.on("typing_start", (data) => {
       const { chatId, userName } = data;
-      socket.to(chatId).emit("user_typing", { userName });
+      socket.to(chatId).emit("user_typing", { userName, chatId });
     });
 
     socket.on("typing_stop", (chatId) => {
-      socket.to(chatId).emit("user_stopped_typing");
-    });
-
-    // Mark messages as read
-    socket.on("mark_read", (data) => {
-      const { chatId, userId } = data;
-      socket.to(chatId).emit("messages_read", { userId });
+      socket.to(chatId).emit("user_stopped_typing", { chatId });
     });
 
     // User disconnect
@@ -70,12 +90,13 @@ export const initializeSocket = (server) => {
       console.log("❌ User disconnected:", socket.id);
       
       // Find and remove user from onlineUsers
-      for (const [userId, socketId] of onlineUsers.entries()) {
-        if (socketId === socket.id) {
-          onlineUsers.delete(userId);
-          socket.broadcast.emit("user_status", { userId, status: "offline" });
-          break;
-        }
+      if (socket.userId) {
+        onlineUsers.delete(socket.userId);
+        socket.broadcast.emit("user_status", { 
+          userId: socket.userId, 
+          status: "offline" 
+        });
+        console.log(`User ${socket.userId} went offline`);
       }
     });
   });
@@ -90,8 +111,16 @@ export const getIO = () => {
   return io;
 };
 
+// Helper to emit to specific user by userId
 export const emitToUser = (userId, event, data) => {
   if (io) {
     io.emit(event, { userId, ...data });
+  }
+};
+
+// Helper to emit to a specific chat room
+export const emitToChat = (chatId, event, data) => {
+  if (io) {
+    io.to(chatId).emit(event, data);
   }
 };
