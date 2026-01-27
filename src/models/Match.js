@@ -5,16 +5,15 @@ const MatchSchema = new mongoose.Schema({
   user2: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   status: { 
     type: String, 
-    enum: ["pending", "matched", "rejected"], 
+    enum: ["pending", "accepted", "rejected"], // ✅ FIXED: Changed "matched" to "accepted"
     default: "pending" 
   },
-  initiatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-  acceptedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // Track who accepted
   createdAt: { type: Date, default: Date.now },
   expiresAt: { type: Date, default: () => new Date(+new Date() + 7*24*60*60*1000) } // 7 days expiry
 });
 
-// Ensure unique match pairs
+// ✅ FIXED: Allow both directions of the same match
+// This index prevents duplicate matches in BOTH directions
 MatchSchema.index({ user1: 1, user2: 1 }, { unique: true });
 
 // Auto-delete expired pending matches
