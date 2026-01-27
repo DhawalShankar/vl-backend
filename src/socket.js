@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 let io;
 
 export const initializeSocket = (server) => {
+  // ✅ NEW WAY - Single object parameter
   io = new Server(server, {
     cors: {
       origin: [
@@ -13,36 +14,55 @@ export const initializeSocket = (server) => {
         "https://www.vartalang.in"
       ],
       credentials: true,
+      methods: ["GET", "POST"]
     },
+    transports: ['websocket', 'polling'],
+    allowEIO3: true // ✅ For backward compatibility
   });
 
   // Store online users: { userId: socketId }
   const onlineUsers = new Map();
 
+  // ✅ Optional: Authentication middleware (RECOMMENDED)
+  io.use((socket, next) => {
+    const token = socket.handshake.auth.token;
+    const userId = socket.handshake.auth.userId;
+
+    if (!token || !userId) {
+      console.log("⚠️ No auth provided, allowing connection anyway");
+      return next(); // Allow connection without auth for now
+    }
+
+    // Verify JWT if provided
+    if (process.env.JWT_SECRET) {
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        if (decoded.userId !== userId) {
+          return next(new Error("Invalid token"));
+        }
+        socket.userId = userId; // ✅ Attach userId to socket
+        next();
+      } catch (err) {
+        console.log("⚠️ Token verification failed:", err.message);
+        return next(new Error("Authentication error"));
+      }
+    } else {
+      socket.userId = userId;
+      next();
+    }
+  });
+
   io.on("connection", (socket) => {
-    console.log("✅ User connected:", socket.id);
+    console.log(`✅ User connected: ${socket.id}`);
 
     // User authentication and joining
     socket.on("user_online", async (data) => {
       try {
         const { userId, token } = data;
         
-        // Optional: Verify JWT token
-        if (token && process.env.JWT_SECRET) {
-          try {
-            const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            if (decoded.userId !== userId) {
-              socket.emit("auth_error", { message: "Invalid token" });
-              return;
-            }
-          } catch (err) {
-            console.log("Token verification failed, continuing anyway");
-          }
-        }
-
         // Store user mapping
         onlineUsers.set(userId, socket.id);
-        socket.userId = userId; // Store on socket for easy access
+        socket.userId = userId;
         
         console.log(`✅ User ${userId} is online (socket: ${socket.id})`);
         
@@ -50,9 +70,13 @@ export const initializeSocket = (server) => {
         socket.broadcast.emit("user_status", { userId, status: "online" });
         
         // Confirm connection to the user
-        socket.emit("connected", { userId, socketId: socket.id });
+        socket.emit("connected", { 
+          userId, 
+          socketId: socket.id,
+          message: "Successfully connected to Socket.IO"
+        });
       } catch (error) {
-        console.error("Error in user_online:", error);
+        console.error("❌ Error in user_online:", error);
         socket.emit("error", { message: "Failed to connect" });
       }
     });
@@ -72,7 +96,7 @@ export const initializeSocket = (server) => {
     // Leave a chat room
     socket.on("leave_chat", (chatId) => {
       socket.leave(chatId);
-      console.log(`Socket ${socket.id} left chat: ${chatId}`);
+      console.log(`❌ Socket ${socket.id} left chat: ${chatId}`);
     });
 
     // Typing indicator
@@ -86,8 +110,8 @@ export const initializeSocket = (server) => {
     });
 
     // User disconnect
-    socket.on("disconnect", () => {
-      console.log("❌ User disconnected:", socket.id);
+    socket.on("disconnect", (reason) => {
+      console.log(`❌ User disconnected: ${socket.id}, Reason: ${reason}`);
       
       // Find and remove user from onlineUsers
       if (socket.userId) {
@@ -96,11 +120,12 @@ export const initializeSocket = (server) => {
           userId: socket.userId, 
           status: "offline" 
         });
-        console.log(`User ${socket.userId} went offline`);
+        console.log(`👋 User ${socket.userId} went offline`);
       }
     });
   });
 
+  console.log("🔌 Socket.IO initialized successfully");
   return io;
 };
 
