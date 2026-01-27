@@ -2,7 +2,8 @@ import dotenv from "dotenv";
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
-
+import matchRoutes from "./routes/match.routes.js";
+import chatRoutes from "./routes/chat.routes.js";
 dotenv.config();
 
 const app = express();
@@ -38,6 +39,8 @@ mongoose
 // Routes
 import authRoutes from "./routes/auth.routes.js";
 app.use("/auth", authRoutes);
+app.use("/matches", matchRoutes);
+app.use("/chats", chatRoutes);
 
 // Health check endpoint
 app.get("/", (req, res) => {
