@@ -11,7 +11,6 @@ export const emitToChat = (chatId, event, data) => {
   io.to(`chat_${chatId}`).emit(event, data);
 };
 
-export { io as getIO };
 export const initializeSocket = (server) => {
   io = new Server(server, {
     cors: {
