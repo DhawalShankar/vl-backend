@@ -4,7 +4,14 @@ import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 
 let io;
+export const emitToChat = (chatId, event, data) => {
+  if (!io) {
+    throw new Error('Socket.io not initialized');
+  }
+  io.to(`chat_${chatId}`).emit(event, data);
+};
 
+export { io as getIO };
 export const initializeSocket = (server) => {
   io = new Server(server, {
     cors: {
