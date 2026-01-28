@@ -64,6 +64,6 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
-  console.log(`🚀 Backend running on port ${PORT}`); // ✅ FIXED: Added backticks
-  console.log(`🔌 Socket.IO ready for connections`); // ✅ FIXED: Added backticks
+  console.log(`🚀 Backend running on port ${PORT}`); // ✅ FIXED
+  console.log(`🔌 Socket.IO ready for connections`); // ✅ FIXED
 });
