@@ -8,8 +8,6 @@ export const emitToChat = (chatId, event, data) => {
   if (!io) {
     throw new Error('Socket.io not initialized');
   }
-  // ❌ WRONG: io.to`chat_${chatId}`).emit(event, data);
-  // ✅ CORRECT:
   io.to(`chat_${chatId}`).emit(event, data);
 };
 
@@ -39,13 +37,9 @@ export const initializeSocket = (server) => {
   });
 
   io.on('connection', (socket) => {
-    // ❌ WRONG: console.log`✅ User ${socket.userId} connected to socket`);
-    // ✅ CORRECT:
     console.log(`✅ User ${socket.userId} connected to socket`);
     
     // Join user-specific room
-    // ❌ WRONG: socket.join`user_${socket.userId}`);
-    // ✅ CORRECT:
     socket.join(`user_${socket.userId}`);
     console.log(`📍 User ${socket.userId} joined room: user_${socket.userId}`);
 
@@ -57,19 +51,15 @@ export const initializeSocket = (server) => {
       });
     });
 
-    // Handle chat events
-    socket.on('join_chat', (chatId) => {
-      // ❌ WRONG: socket.join`chat_${chatId}`);
-      // ✅ CORRECT:
-      socket.join(`chat_${chatId}`);
-      console.log(`💬 User ${socket.userId} joined chat: ${chatId}`);
+    // ✅ FIXED: Accept room name directly (frontend already sends with chat_ prefix)
+    socket.on('join_chat', (roomName) => {
+      socket.join(roomName);  // ✅ Direct room name, NO prefix added
+      console.log(`💬 User ${socket.userId} joined room: ${roomName}`);
     });
 
-    socket.on('leave_chat', (chatId) => {
-      // ❌ WRONG: socket.leave`chat_${chatId}`);
-      // ✅ CORRECT:
-      socket.leave(`chat_${chatId}`);
-      console.log(`👋 User ${socket.userId} left chat: ${chatId}`);
+    socket.on('leave_chat', (roomName) => {
+      socket.leave(roomName);  // ✅ Direct room name, NO prefix added
+      console.log(`👋 User ${socket.userId} left room: ${roomName}`);
     });
 
     socket.on('disconnect', () => {
