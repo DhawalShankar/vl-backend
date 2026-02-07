@@ -1,3 +1,4 @@
+// server.js
 import dotenv from "dotenv";
 import express from "express";
 import mongoose from "mongoose";
@@ -19,6 +20,7 @@ initializeSocket(server);
 
 const allowedOrigins = [
   "http://localhost:3000",
+  "http://localhost:5173", // Add your local frontend
   "https://vartalang.vercel.app",
   "https://vartalang.in",
   "https://www.vartalang.in"
@@ -63,7 +65,10 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 4000;
+
 server.listen(PORT, () => {
-  console.log(`🚀 Backend running on port ${PORT}`); // ✅ FIXED
-  console.log(`🔌 Socket.IO ready for connections`); // ✅ FIXED
+  // ❌ WRONG: console.log`🚀 Backend running on port ${PORT}`;
+  // ✅ CORRECT:
+  console.log(`🚀 Backend running on port ${PORT}`);
+  console.log(`🔌 Socket.IO ready for connections`);
 });

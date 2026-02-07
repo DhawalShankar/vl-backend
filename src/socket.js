@@ -1,13 +1,15 @@
-// socket.js - FIXED VERSION with proper user room management
-
+// socket.js 
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 
 let io;
+
 export const emitToChat = (chatId, event, data) => {
   if (!io) {
     throw new Error('Socket.io not initialized');
   }
+  // ❌ WRONG: io.to`chat_${chatId}`).emit(event, data);
+  // ✅ CORRECT:
   io.to(`chat_${chatId}`).emit(event, data);
 };
 
@@ -19,7 +21,7 @@ export const initializeSocket = (server) => {
     }
   });
 
-  // ✅ FIXED: Socket authentication and room joining
+  // Socket authentication
   io.use((socket, next) => {
     try {
       const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.split(' ')[1];
@@ -27,7 +29,7 @@ export const initializeSocket = (server) => {
       if (!token) {
         return next(new Error('Authentication error'));
       }
-
+      
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       socket.userId = decoded.userId;
       next();
@@ -37,9 +39,13 @@ export const initializeSocket = (server) => {
   });
 
   io.on('connection', (socket) => {
+    // ❌ WRONG: console.log`✅ User ${socket.userId} connected to socket`);
+    // ✅ CORRECT:
     console.log(`✅ User ${socket.userId} connected to socket`);
-
-    // ✅ CRITICAL: Join user-specific room for targeted notifications
+    
+    // Join user-specific room
+    // ❌ WRONG: socket.join`user_${socket.userId}`);
+    // ✅ CORRECT:
     socket.join(`user_${socket.userId}`);
     console.log(`📍 User ${socket.userId} joined room: user_${socket.userId}`);
 
@@ -53,11 +59,15 @@ export const initializeSocket = (server) => {
 
     // Handle chat events
     socket.on('join_chat', (chatId) => {
+      // ❌ WRONG: socket.join`chat_${chatId}`);
+      // ✅ CORRECT:
       socket.join(`chat_${chatId}`);
       console.log(`💬 User ${socket.userId} joined chat: ${chatId}`);
     });
 
     socket.on('leave_chat', (chatId) => {
+      // ❌ WRONG: socket.leave`chat_${chatId}`);
+      // ✅ CORRECT:
       socket.leave(`chat_${chatId}`);
       console.log(`👋 User ${socket.userId} left chat: ${chatId}`);
     });

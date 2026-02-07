@@ -1,3 +1,4 @@
+// chat.routes.js
 import { Router } from "express";
 import { 
   getMyChats, 

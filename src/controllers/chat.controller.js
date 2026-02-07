@@ -1,3 +1,4 @@
+// chat.controller.js
 import Chat from "../models/Chat.js";
 import User from "../models/User.js";
 import nodemailer from "nodemailer";
@@ -94,13 +95,13 @@ export const sendMessage = async (req, res) => {
     try {
       const io = getIO();
       
-      // ✅ Emit immediately - no delay
-      io.to(chatId).emit("receive_message", {
+      // ✅ CORRECT: Emit with chat_ prefix
+      io.to(`chat_${chatId}`).emit("receive_message", {
         chatId,
         message: messageData
       });
       
-      console.log(`✅ Message emitted to chat ${chatId}:`, messageData);
+      console.log(`✅ Message emitted to chat_${chatId}:`, messageData);
     } catch (socketError) {
       console.error("Socket.io error:", socketError);
     }
@@ -150,14 +151,15 @@ export const getChatMessages = async (req, res) => {
       // Emit read receipt via Socket.IO
       try {
         const io = getIO();
-        io.to(chatId).emit("messages_read", { 
+        // ✅ CORRECT: Use chat_ prefix
+        io.to(`chat_${chatId}`).emit("messages_read", { 
           userId, 
           chatId,
           messageIds: messagesToMarkRead,
           readBy: userId 
         });
         
-        console.log(`✅ Marked ${messagesToMarkRead.length} messages as read`);
+        console.log(`✅ Marked ${messagesToMarkRead.length} messages as read in chat_${chatId}`);
       } catch (socketError) {
         console.log("Socket.io not available for read receipts");
       }
@@ -187,6 +189,7 @@ export const getChatMessages = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch messages" });
   }
 };
+
 export const blockUser = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -209,7 +212,9 @@ export const blockUser = async (req, res) => {
     // Notify via Socket.IO
     try {
       const io = getIO();
-      emitToChat(chatId, "user_blocked", { chatId, blockedBy: userId });
+      // ✅ CORRECT: Use chat_ prefix
+      io.to(`chat_${chatId}`).emit("user_blocked", { chatId, blockedBy: userId });
+      console.log(`✅ Block notification sent to chat_${chatId}`);
     } catch (socketError) {
       console.log("Socket.io not available for block notification");
     }
@@ -238,7 +243,9 @@ export const unblockUser = async (req, res) => {
     // Notify via Socket.IO
     try {
       const io = getIO();
-      emitToChat(chatId, "user_unblocked", { chatId, unblockedBy: userId });
+      // ✅ CORRECT: Use chat_ prefix
+      io.to(`chat_${chatId}`).emit("user_unblocked", { chatId, unblockedBy: userId });
+      console.log(`✅ Unblock notification sent to chat_${chatId}`);
     } catch (socketError) {
       console.log("Socket.io not available for unblock notification");
     }
