@@ -10,7 +10,7 @@ export const getMyNotifications = async (req, res) => {
     })
     .populate('sender', 'name languagesKnow primaryLanguageToLearn')
     .populate('matchId')
-    .populate('chatId') // ✅ ADDED: Populate chatId for message notifications
+    .populate('chatId')
     .sort({ createdAt: -1 })
     .limit(50);
 
@@ -79,6 +79,30 @@ export const deleteNotification = async (req, res) => {
   } catch (error) {
     console.error("Delete notification error:", error);
     res.status(500).json({ error: "Failed to delete notification" });
+  }
+};
+
+// ✅ NEW: Delete all notifications for a specific chat
+export const deleteNotificationsForChat = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { chatId } = req.params;
+
+    const result = await Notification.deleteMany({
+      recipient: userId,
+      chatId: chatId,
+      type: "new_message"
+    });
+
+    console.log(`✅ Deleted ${result.deletedCount} notifications for chat ${chatId}`);
+
+    res.json({ 
+      message: "Chat notifications deleted",
+      count: result.deletedCount
+    });
+  } catch (error) {
+    console.error("Delete chat notifications error:", error);
+    res.status(500).json({ error: "Failed to delete chat notifications" });
   }
 };
 

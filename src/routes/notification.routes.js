@@ -5,6 +5,7 @@ import {
   markAsRead, 
   markAllAsRead,
   deleteNotification,
+  deleteNotificationsForChat, // ✅ NEW
   getUnreadCount
 } from "../controllers/notification.controller.js";
 import { protect } from "../middlewares/auth.middleware.js";
@@ -16,5 +17,6 @@ router.get("/unread-count", protect, getUnreadCount);
 router.patch("/:notificationId/read", protect, markAsRead);
 router.patch("/mark-all-read", protect, markAllAsRead);
 router.delete("/:notificationId", protect, deleteNotification);
+router.delete("/chat/:chatId", protect, deleteNotificationsForChat); // ✅ NEW
 
 export default router;
