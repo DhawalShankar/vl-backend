@@ -1,6 +1,7 @@
 // chat.controller.js
 import Chat from "../models/Chat.js";
 import User from "../models/User.js";
+import Notification from "../models/Notification.js"; // ✅ Import Notification model
 import nodemailer from "nodemailer";
 import { getIO, emitToChat } from "../socket.js";
 
@@ -65,7 +66,7 @@ export const sendMessage = async (req, res) => {
 
     // Create the message
     const newMessage = {
-      sender: userId, // ✅ Store as ObjectId
+      sender: userId,
       text: text.trim(),
       timestamp: new Date(),
       read: false
@@ -80,11 +81,15 @@ export const sendMessage = async (req, res) => {
     
     // Get sender info
     const sender = chat.participants.find(p => p._id.toString() === userId);
+    
+    // ✅ Get recipient (the OTHER person in chat)
+    const recipient = chat.participants.find(p => p._id.toString() !== userId);
+    const recipientId = recipient._id.toString();
 
-    // ✅ CRITICAL: Convert sender ObjectId to string for frontend
+    // Convert sender ObjectId to string for frontend
     const messageData = {
       _id: savedMessage._id.toString(),
-      sender: savedMessage.sender.toString(), // ✅ Convert to string
+      sender: savedMessage.sender.toString(),
       senderName: sender?.name || 'User',
       text: savedMessage.text,
       timestamp: savedMessage.timestamp,
@@ -95,7 +100,6 @@ export const sendMessage = async (req, res) => {
     try {
       const io = getIO();
       
-      // ✅ CORRECT: Emit with chat_ prefix
       io.to(`chat_${chatId}`).emit("receive_message", {
         chatId,
         message: messageData
@@ -104,6 +108,40 @@ export const sendMessage = async (req, res) => {
       console.log(`✅ Message emitted to chat_${chatId}:`, messageData);
     } catch (socketError) {
       console.error("Socket.io error:", socketError);
+    }
+
+    // ✅ NEW: Create notification for recipient
+    try {
+      await Notification.create({
+        recipient: recipientId,
+        sender: userId,
+        type: "new_message",
+        chatId: chatId,
+        message: text.trim().substring(0, 100), // Store first 100 chars as preview
+        read: false
+      });
+
+      console.log(`✅ Notification created for user ${recipientId}`);
+
+      // ✅ NEW: Emit notification to recipient's personal room
+      const io = getIO();
+      io.to(`user_${recipientId}`).emit("new_message_notification", {
+        recipientId: recipientId,
+        senderId: userId,
+        chatId: chatId,
+        message: text.trim().substring(0, 100),
+        sender: { 
+          name: sender?.name || 'User',
+          _id: userId 
+        },
+        type: "new_message",
+        createdAt: new Date()
+      });
+
+      console.log(`✅ Notification emitted to user_${recipientId}`);
+    } catch (notificationError) {
+      console.error("Notification error:", notificationError);
+      // Don't fail the message send if notification fails
     }
 
     // Return message data to sender
@@ -117,7 +155,6 @@ export const sendMessage = async (req, res) => {
   }
 };
 
-// ✅ Also fix getChatMessages to return sender as string
 export const getChatMessages = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -148,10 +185,25 @@ export const getChatMessages = async (req, res) => {
     if (markedAsRead) {
       await chat.save();
       
+      // ✅ NEW: Mark notifications as read when opening chat
+      try {
+        await Notification.updateMany(
+          { 
+            recipient: userId, 
+            chatId: chatId,
+            type: "new_message",
+            read: false 
+          },
+          { read: true }
+        );
+        console.log(`✅ Marked notifications as read for chat ${chatId}`);
+      } catch (notifError) {
+        console.error("Error marking notifications as read:", notifError);
+      }
+      
       // Emit read receipt via Socket.IO
       try {
         const io = getIO();
-        // ✅ CORRECT: Use chat_ prefix
         io.to(`chat_${chatId}`).emit("messages_read", { 
           userId, 
           chatId,
@@ -167,10 +219,10 @@ export const getChatMessages = async (req, res) => {
 
     const otherUser = chat.participants.find(p => p._id.toString() !== userId);
 
-    // ✅ Convert sender ObjectIds to strings
+    // Convert sender ObjectIds to strings
     const formattedMessages = chat.messages.map(msg => ({
       _id: msg._id.toString(),
-      sender: msg.sender.toString(), // ✅ Convert to string
+      sender: msg.sender.toString(),
       text: msg.text,
       timestamp: msg.timestamp,
       read: msg.read
@@ -180,7 +232,7 @@ export const getChatMessages = async (req, res) => {
       chat: {
         id: chat._id,
         user: otherUser,
-        messages: formattedMessages, // ✅ Use formatted messages
+        messages: formattedMessages,
         isBlocked: chat.blockedBy.includes(userId)
       }
     });
@@ -212,7 +264,6 @@ export const blockUser = async (req, res) => {
     // Notify via Socket.IO
     try {
       const io = getIO();
-      // ✅ CORRECT: Use chat_ prefix
       io.to(`chat_${chatId}`).emit("user_blocked", { chatId, blockedBy: userId });
       console.log(`✅ Block notification sent to chat_${chatId}`);
     } catch (socketError) {
@@ -243,7 +294,6 @@ export const unblockUser = async (req, res) => {
     // Notify via Socket.IO
     try {
       const io = getIO();
-      // ✅ CORRECT: Use chat_ prefix
       io.to(`chat_${chatId}`).emit("user_unblocked", { chatId, unblockedBy: userId });
       console.log(`✅ Unblock notification sent to chat_${chatId}`);
     } catch (socketError) {

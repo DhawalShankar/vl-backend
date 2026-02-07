@@ -1,3 +1,4 @@
+// notification.routes.js
 import { Router } from "express";
 import { 
   getMyNotifications, 

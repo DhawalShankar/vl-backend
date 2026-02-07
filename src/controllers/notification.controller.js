@@ -1,3 +1,4 @@
+// notification.controller.js
 import Notification from "../models/Notification.js";
 
 export const getMyNotifications = async (req, res) => {
@@ -9,6 +10,7 @@ export const getMyNotifications = async (req, res) => {
     })
     .populate('sender', 'name languagesKnow primaryLanguageToLearn')
     .populate('matchId')
+    .populate('chatId') // ✅ ADDED: Populate chatId for message notifications
     .sort({ createdAt: -1 })
     .limit(50);
 
