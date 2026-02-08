@@ -13,7 +13,6 @@ import { protect } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
-// Public routes
 router.get("/stats", getJobStats);
 router.get("/listings", getJobListings);
 router.get("/listings/:id", getJobById);
@@ -21,7 +20,6 @@ router.post("/listings", createJob);
 router.post("/listings/:id/view", incrementJobViews);
 router.get("/languages", getAvailableLanguages);
 
-// Protected / Admin routes
 router.post("/mark-expired", protect, markExpiredJobs);
 router.delete("/listings/:id", protect, deleteJob);
 

@@ -1,10 +1,6 @@
-const cron = require('node-cron');
-const Job = require('../models/Job');
+import cron from "node-cron";
+import Job from "../models/Job.js";
 
-/**
- * Schedule cron job to mark expired jobs
- * Runs every day at midnight (00:00)
- */
 const scheduleJobExpiry = () => {
   // Run at midnight every day: '0 0 * * *'
   // For testing, you can use '*/5 * * * *' to run every 5 minutes
@@ -21,11 +17,6 @@ const scheduleJobExpiry = () => {
   console.log('📅 Job expiry scheduler initialized - runs daily at midnight');
 };
 
-/**
- * Schedule cron job to clean up old expired jobs
- * Runs once a week on Sunday at 2 AM
- * Deletes jobs that have been expired for more than 30 days
- */
 const scheduleJobCleanup = () => {
   // Run weekly on Sunday at 2 AM: '0 2 * * 0'
   cron.schedule('0 2 * * 0', async () => {
@@ -51,6 +42,11 @@ const scheduleJobCleanup = () => {
 };
 
 /**
+ * Schedule cron job to clean up old expired jobs
+ * Runs once a week on Sunday at 2 AM
+ * Deletes jobs that have been expired for more than 30 days
+ */
+/**
  * Initialize all job schedulers
  */
 const initializeJobSchedulers = () => {
@@ -58,8 +54,3 @@ const initializeJobSchedulers = () => {
   scheduleJobCleanup();
 };
 
-module.exports = {
-  initializeJobSchedulers,
-  scheduleJobExpiry,
-  scheduleJobCleanup
-};

@@ -1,184 +1,106 @@
-const Job = require('../models/Job');
+import Job from "../models/Job.js";
 
-// List of disposable email domains to block
+/* -------------------- CONSTANTS -------------------- */
+
 const DISPOSABLE_DOMAINS = [
-  'tempmail.com',
-  'guerrillamail.com',
-  'mailinator.com',
-  '10minutemail.com',
-  'throwaway.email',
-  'temp-mail.org',
-  'fakeinbox.com'
+  "tempmail.com",
+  "guerrillamail.com",
+  "mailinator.com",
+  "10minutemail.com",
+  "throwaway.email",
+  "temp-mail.org",
+  "fakeinbox.com"
 ];
 
-// Keywords that suggest non-language jobs (optional validation)
 const NON_LANGUAGE_KEYWORDS = [
-  'software engineer',
-  'web developer',
-  'data scientist',
-  'accountant',
-  'sales manager',
-  'marketing manager',
-  'graphic designer',
-  'project manager',
-  'business analyst'
+  "software engineer",
+  "web developer",
+  "data scientist",
+  "accountant",
+  "sales manager",
+  "marketing manager",
+  "graphic designer",
+  "project manager",
+  "business analyst"
 ];
 
-/**
- * Validate if email is from a disposable domain
- */
+/* -------------------- HELPERS -------------------- */
+
 const isDisposableEmail = (email) => {
-  const domain = email.split('@')[1]?.toLowerCase();
+  const domain = email.split("@")[1]?.toLowerCase();
   return DISPOSABLE_DOMAINS.includes(domain);
 };
 
-/**
- * Validate if job appears to be language-related
- */
 const isLanguageRelatedJob = (title, description) => {
-  const combinedText = `${title} ${description}`.toLowerCase();
-  
-  // Check for non-language keywords
-  const hasNonLanguageKeyword = NON_LANGUAGE_KEYWORDS.some(keyword =>
-    combinedText.includes(keyword.toLowerCase())
-  );
-  
-  return !hasNonLanguageKeyword;
+  const text = `${title} ${description}`.toLowerCase();
+  return !NON_LANGUAGE_KEYWORDS.some(k => text.includes(k));
 };
 
-/**
- * @desc    Get job statistics
- * @route   GET /api/jobs/stats
- * @access  Public
- */
-exports.getJobStats = async (req, res) => {
+/* -------------------- CONTROLLERS -------------------- */
+
+export const getJobStats = async (req, res) => {
   try {
     const stats = await Job.getJobStats();
-
-    res.status(200).json({
-      success: true,
-      stats
-    });
-  } catch (error) {
-    console.error('Error getting job stats:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching job statistics',
-      error: error.message
-    });
+    res.status(200).json({ success: true, stats });
+  } catch (err) {
+    console.error("Job stats error:", err);
+    res.status(500).json({ success: false, message: "Failed to fetch stats" });
   }
 };
 
-/**
- * @desc    Get all active job listings with filters
- * @route   GET /api/jobs/listings
- * @access  Public
- */
-exports.getJobListings = async (req, res) => {
+export const getJobListings = async (req, res) => {
   try {
-    const {
-      language,
-      jobType,
-      isRemote,
-      search,
-      page = 1,
-      limit = 50
-    } = req.query;
+    const { language, jobType, isRemote, search, page = 1, limit = 50 } = req.query;
 
-    // Build filters
     const filters = {};
     if (language) filters.language = language;
     if (jobType) filters.jobType = jobType;
-    if (isRemote !== undefined) filters.isRemote = isRemote === 'true';
+    if (isRemote !== undefined) filters.isRemote = isRemote === "true";
     if (search) filters.search = search;
 
-    // Get jobs with pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (page - 1) * limit;
+
     const jobs = await Job.getActiveJobs(filters)
       .skip(skip)
-      .limit(parseInt(limit))
-      .select('-__v');
+      .limit(Number(limit))
+      .select("-__v");
 
-    // Get total count for pagination
-    const query = { status: 'active', expiryDate: { $gt: new Date() } };
-    if (filters.language) query.language = new RegExp(filters.language, 'i');
-    if (filters.jobType) query.jobType = filters.jobType;
-    if (filters.isRemote !== undefined) query.isRemote = filters.isRemote;
-    if (filters.search) query.$text = { $search: filters.search };
+    const totalJobs = await Job.countDocuments({
+      status: "active",
+      expiryDate: { $gt: new Date() }
+    });
 
-    const totalJobs = await Job.countDocuments(query);
-
-    res.status(200).json({
+    res.json({
       success: true,
-      count: jobs.length,
+      jobs,
       totalJobs,
-      totalPages: Math.ceil(totalJobs / parseInt(limit)),
-      currentPage: parseInt(page),
-      jobs
+      currentPage: Number(page),
+      totalPages: Math.ceil(totalJobs / limit)
     });
-  } catch (error) {
-    console.error('Error getting job listings:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching job listings',
-      error: error.message
-    });
+  } catch (err) {
+    console.error("Get jobs error:", err);
+    res.status(500).json({ success: false, message: "Failed to fetch jobs" });
   }
 };
 
-/**
- * @desc    Get single job by ID
- * @route   GET /api/jobs/listings/:id
- * @access  Public
- */
-exports.getJobById = async (req, res) => {
+export const getJobById = async (req, res) => {
   try {
-    const job = await Job.findById(req.params.id).select('-__v');
+    const job = await Job.findById(req.params.id).select("-__v");
 
-    if (!job) {
-      return res.status(404).json({
-        success: false,
-        message: 'Job not found'
-      });
-    }
+    if (!job)
+      return res.status(404).json({ success: false, message: "Job not found" });
 
-    // Check if job is expired
-    if (job.status === 'expired' || job.isExpired) {
-      return res.status(410).json({
-        success: false,
-        message: 'This job listing has expired'
-      });
-    }
+    if (job.status === "expired" || job.isExpired)
+      return res.status(410).json({ success: false, message: "Job expired" });
 
-    res.status(200).json({
-      success: true,
-      job
-    });
-  } catch (error) {
-    console.error('Error getting job:', error);
-    
-    // Handle invalid MongoDB ID
-    if (error.name === 'CastError') {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid job ID format'
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching job details',
-      error: error.message
-    });
+    res.json({ success: true, job });
+  } catch (err) {
+    console.error("Get job error:", err);
+    res.status(500).json({ success: false, message: "Invalid job ID" });
   }
 };
 
-/**
- * @desc    Create new job listing
- * @route   POST /api/jobs/listings
- * @access  Public
- */
-exports.createJob = async (req, res) => {
+export const createJob = async (req, res) => {
   try {
     const {
       title,
@@ -194,232 +116,97 @@ exports.createJob = async (req, res) => {
       contactEmail
     } = req.body;
 
-    // Validate required fields
-    if (!title || !language || !proficiencyLevel || !jobType || 
-        !companyName || !location || !description || !contactEmail) {
-      return res.status(400).json({
-        success: false,
-        message: 'All required fields must be provided',
-        requiredFields: [
-          'title', 'language', 'proficiencyLevel', 'jobType',
-          'companyName', 'location', 'description', 'contactEmail'
-        ]
-      });
+    if (!title || !language || !companyName || !description || !contactEmail) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
     }
 
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(contactEmail)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide a valid email address'
-      });
-    }
-
-    // Check for disposable email
     if (isDisposableEmail(contactEmail)) {
       return res.status(400).json({
         success: false,
-        message: 'Please use an official company email address. Temporary email services are not allowed.'
+        message: "Disposable email not allowed"
       });
     }
 
-    // Optional: Validate language-related job
     if (!isLanguageRelatedJob(title, description)) {
       return res.status(400).json({
         success: false,
-        message: 'This appears to be a non-language job. VartaLang Jobs is exclusively for language-related positions.',
-        hint: 'Jobs should involve translation, teaching, interpretation, content writing, or other language work.'
+        message: "Only language-related jobs allowed"
       });
     }
 
-    // Create job object
-    const jobData = {
+    const job = await Job.create({
       title: title.trim(),
       language: language.trim(),
       proficiencyLevel,
       jobType,
       companyName: companyName.trim(),
       location: location.trim(),
-      isRemote: isRemote === true || isRemote === 'true',
+      isRemote: isRemote === true || isRemote === "true",
       description: description.trim(),
-      responsibilities: responsibilities || [],
-      requirements: requirements || [],
-      contactEmail: contactEmail.trim().toLowerCase()
-    };
-
-    // Create job in database
-    const job = await Job.create(jobData);
+      responsibilities,
+      requirements,
+      contactEmail: contactEmail.toLowerCase()
+    });
 
     res.status(201).json({
       success: true,
-      message: 'Job posted successfully! Your listing will be active for 7 days.',
-      job: {
-        _id: job._id,
-        title: job.title,
-        language: job.language,
-        companyName: job.companyName,
-        expiryDate: job.expiryDate,
-        daysRemaining: job.daysRemaining
-      }
+      message: "Job listed successfully",
+      jobId: job._id,
+      expiryDate: job.expiryDate
     });
-  } catch (error) {
-    console.error('Error creating job:', error);
-
-    // Handle validation errors
-    if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => err.message);
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: 'Error creating job listing',
-      error: error.message
-    });
+  } catch (err) {
+    console.error("Create job error:", err);
+    res.status(500).json({ success: false, message: "Failed to create job" });
   }
 };
 
-/**
- * @desc    Increment job view count
- * @route   POST /api/jobs/listings/:id/view
- * @access  Public
- */
-exports.incrementJobViews = async (req, res) => {
+export const incrementJobViews = async (req, res) => {
   try {
     const job = await Job.findById(req.params.id);
+    if (!job) return res.status(404).json({ success: false });
 
-    if (!job) {
-      return res.status(404).json({
-        success: false,
-        message: 'Job not found'
-      });
-    }
+    if (!job.isExpired) await job.incrementViews();
 
-    // Don't increment views for expired jobs
-    if (job.status === 'expired' || job.isExpired) {
-      return res.status(200).json({
-        success: true,
-        message: 'Job is expired'
-      });
-    }
-
-    await job.incrementViews();
-
-    res.status(200).json({
-      success: true,
-      views: job.views
-    });
-  } catch (error) {
-    console.error('Error incrementing views:', error);
-    
-    // Handle invalid MongoDB ID
-    if (error.name === 'CastError') {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid job ID format'
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: 'Error updating view count',
-      error: error.message
-    });
+    res.json({ success: true, views: job.views });
+  } catch (err) {
+    console.error("View increment error:", err);
+    res.status(500).json({ success: false });
   }
 };
 
-/**
- * @desc    Mark expired jobs (to be called by cron job)
- * @route   POST /api/jobs/mark-expired
- * @access  Private/Admin (add auth middleware)
- */
-exports.markExpiredJobs = async (req, res) => {
+export const markExpiredJobs = async (req, res) => {
   try {
     const result = await Job.markExpiredJobs();
-
-    res.status(200).json({
-      success: true,
-      message: `Marked ${result.modifiedCount} jobs as expired`,
-      modifiedCount: result.modifiedCount
-    });
-  } catch (error) {
-    console.error('Error marking expired jobs:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error marking expired jobs',
-      error: error.message
-    });
+    res.json({ success: true, modified: result.modifiedCount });
+  } catch (err) {
+    console.error("Expire jobs error:", err);
+    res.status(500).json({ success: false });
   }
 };
 
-/**
- * @desc    Get unique languages from active jobs
- * @route   GET /api/jobs/languages
- * @access  Public
- */
-exports.getAvailableLanguages = async (req, res) => {
+export const getAvailableLanguages = async (req, res) => {
   try {
-    const languages = await Job.distinct('language', {
-      status: 'active',
+    const languages = await Job.distinct("language", {
+      status: "active",
       expiryDate: { $gt: new Date() }
     });
 
-    res.status(200).json({
-      success: true,
-      count: languages.length,
-      languages: languages.sort()
-    });
-  } catch (error) {
-    console.error('Error getting languages:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching available languages',
-      error: error.message
-    });
+    res.json({ success: true, languages: languages.sort() });
+  } catch (err) {
+    console.error("Languages error:", err);
+    res.status(500).json({ success: false });
   }
 };
 
-/**
- * @desc    Delete job (for admin use or job owner - requires auth)
- * @route   DELETE /api/jobs/listings/:id
- * @access  Private (add auth middleware)
- */
-exports.deleteJob = async (req, res) => {
+export const deleteJob = async (req, res) => {
   try {
     const job = await Job.findById(req.params.id);
-
-    if (!job) {
-      return res.status(404).json({
-        success: false,
-        message: 'Job not found'
-      });
-    }
+    if (!job) return res.status(404).json({ success: false });
 
     await job.deleteOne();
-
-    res.status(200).json({
-      success: true,
-      message: 'Job deleted successfully'
-    });
-  } catch (error) {
-    console.error('Error deleting job:', error);
-    
-    if (error.name === 'CastError') {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid job ID format'
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: 'Error deleting job',
-      error: error.message
-    });
+    res.json({ success: true, message: "Job deleted" });
+  } catch (err) {
+    console.error("Delete job error:", err);
+    res.status(500).json({ success: false });
   }
 };

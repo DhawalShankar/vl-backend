@@ -10,6 +10,8 @@ import chatRoutes from "./routes/chat.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import jobRoutes from "./routes/job.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
+import { initializeJobSchedulers } from "./cron/job.cron.js";
+
 
 dotenv.config();
 
@@ -18,7 +20,7 @@ const server = http.createServer(app);
 
 // Initialize Socket.IO
 initializeSocket(server);
-
+initializeJobSchedulers();
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173", // Add your local frontend
