@@ -8,6 +8,7 @@ import { initializeSocket } from "./socket.js";
 import matchRoutes from "./routes/match.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import authRoutes from "./routes/auth.routes.js";
+import jobRoutes from "./routes/job.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 
 dotenv.config();
@@ -52,7 +53,7 @@ app.use("/auth", authRoutes);
 app.use("/matches", matchRoutes);
 app.use("/chats", chatRoutes);
 app.use("/notifications", notificationRoutes);
-
+app.use("/jobs", jobRoutes);
 // Health check endpoint
 app.get("/", (req, res) => {
   res.json({ message: "VartaLang API is running" });
