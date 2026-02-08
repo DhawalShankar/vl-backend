@@ -1,4 +1,4 @@
-// models/Job.js - SUPER SIMPLE - MINIMAL VALIDATION
+// models/Job.js - FIXED VERSION
 import mongoose from "mongoose";
 
 const jobSchema = new mongoose.Schema(
@@ -108,8 +108,8 @@ jobSchema.virtual("isExpired").get(function () {
   return new Date() > this.expiryDate;
 });
 
-/* Middleware */
-jobSchema.pre("save", function (next) {
+/* ✅ FIXED MIDDLEWARE - next() removed */
+jobSchema.pre("save", async function () {
   if (this.isNew && !this.expiryDate) {
     const d = new Date();
     d.setDate(d.getDate() + 7);
@@ -118,7 +118,7 @@ jobSchema.pre("save", function (next) {
   if (this.isExpired) {
     this.status = "expired";
   }
-  next();
+  // No next() needed in async middleware
 });
 
 /* Statics */
