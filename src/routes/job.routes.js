@@ -1,6 +1,5 @@
-const express = require('express');
-const router = express.Router();
-const {
+import { Router } from "express";
+import {
   getJobStats,
   getJobListings,
   getJobById,
@@ -9,19 +8,21 @@ const {
   markExpiredJobs,
   getAvailableLanguages,
   deleteJob
-} = require('../controllers/job.controller');
+} from "../controllers/job.controller.js";
+import { protect } from "../middlewares/auth.middleware.js";
+
+const router = Router();
 
 // Public routes
-router.get('/stats', getJobStats);
-router.get('/listings', getJobListings);
-router.get('/listings/:id', getJobById);
-router.post('/listings', createJob);
-router.post('/listings/:id/view', incrementJobViews);
-router.get('/languages', getAvailableLanguages);
+router.get("/stats", getJobStats);
+router.get("/listings", getJobListings);
+router.get("/listings/:id", getJobById);
+router.post("/listings", createJob);
+router.post("/listings/:id/view", incrementJobViews);
+router.get("/languages", getAvailableLanguages);
 
-// Admin/Protected routes (add authentication middleware as needed)
-// Example: router.post('/mark-expired', authMiddleware, markExpiredJobs);
-router.post('/mark-expired', markExpiredJobs);
-router.delete('/listings/:id', deleteJob);
+// Protected / Admin routes
+router.post("/mark-expired", protect, markExpiredJobs);
+router.delete("/listings/:id", protect, deleteJob);
 
-module.exports = router;
+export default router;
