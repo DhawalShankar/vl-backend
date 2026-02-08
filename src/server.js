@@ -10,7 +10,7 @@ import chatRoutes from "./routes/chat.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import jobRoutes from "./routes/job.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
-import { initializeJobSchedulers } from "./cron/job.cron.js";
+import { initializeJobSchedulers } from "./utils/jobScheduler.js";
 
 
 dotenv.config();
