@@ -95,7 +95,7 @@ jobSchema.index({
   title: "text",
   description: "text",
   companyName: "text",
-  language: "text"
+//   language: "text"
 });
 
 /* Virtuals */
