@@ -1,3 +1,4 @@
+// job.controller.js
 import Job from "../models/Job.js";
 
 /* -------------------- CONSTANTS -------------------- */
@@ -9,7 +10,26 @@ const DISPOSABLE_DOMAINS = [
   "10minutemail.com",
   "throwaway.email",
   "temp-mail.org",
-  "fakeinbox.com"
+  "fakeinbox.com",
+  "yopmail.com",
+  "maildrop.cc"
+];
+
+const LANGUAGE_KEYWORDS = [
+  "translat",
+  "interpret",
+  "language",
+  "bilingual",
+  "multilingual",
+  "native speaker",
+  "fluent",
+  "proficiency",
+  "linguistic",
+  "localization",
+  "l10n",
+  "teach",
+  "tutor",
+  "instructor"
 ];
 
 const NON_LANGUAGE_KEYWORDS = [
@@ -21,19 +41,35 @@ const NON_LANGUAGE_KEYWORDS = [
   "marketing manager",
   "graphic designer",
   "project manager",
-  "business analyst"
+  "business analyst",
+  "full stack",
+  "backend developer",
+  "frontend developer"
 ];
 
 /* -------------------- HELPERS -------------------- */
 
 const isDisposableEmail = (email) => {
+  if (!email) return true;
   const domain = email.split("@")[1]?.toLowerCase();
-  return DISPOSABLE_DOMAINS.includes(domain);
+  return !domain || DISPOSABLE_DOMAINS.includes(domain);
 };
 
 const isLanguageRelatedJob = (title, description) => {
   const text = `${title} ${description}`.toLowerCase();
-  return !NON_LANGUAGE_KEYWORDS.some(k => text.includes(k));
+  
+  // First check: Must NOT contain non-language keywords
+  const hasNonLanguageKeywords = NON_LANGUAGE_KEYWORDS.some(k => text.includes(k));
+  if (hasNonLanguageKeywords) return false;
+  
+  // Second check: MUST contain at least one language-related keyword
+  const hasLanguageKeywords = LANGUAGE_KEYWORDS.some(k => text.includes(k));
+  return hasLanguageKeywords;
+};
+
+const validateEmail = (email) => {
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  return emailRegex.test(email);
 };
 
 /* -------------------- CONTROLLERS -------------------- */
@@ -116,47 +152,99 @@ export const createJob = async (req, res) => {
       contactEmail
     } = req.body;
 
+    // Validation: Required fields
     if (!title || !language || !companyName || !description || !contactEmail) {
-      return res.status(400).json({ success: false, message: "Missing required fields" });
+      return res.status(400).json({ 
+        success: false, 
+        error: "Missing required fields. Please fill in all required fields." 
+      });
     }
 
+    // Validation: Email format
+    if (!validateEmail(contactEmail)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid email format. Please use a valid email address."
+      });
+    }
+
+    // Validation: Disposable email
     if (isDisposableEmail(contactEmail)) {
       return res.status(400).json({
         success: false,
-        message: "Disposable email not allowed"
+        error: "Disposable email addresses are not allowed. Please use an official company email."
       });
     }
 
+    // Validation: Language-related job
     if (!isLanguageRelatedJob(title, description)) {
       return res.status(400).json({
         success: false,
-        message: "Only language-related jobs allowed"
+        error: "This job doesn't appear to be language-focused. Language skill must be the PRIMARY requirement. Include keywords like 'translation', 'interpreter', 'language', 'bilingual', etc."
       });
     }
 
+    // Validation: Description length
+    if (description.trim().length < 50) {
+      return res.status(400).json({
+        success: false,
+        error: "Job description must be at least 50 characters long."
+      });
+    }
+
+    if (description.trim().length > 5000) {
+      return res.status(400).json({
+        success: false,
+        error: "Job description must be less than 5000 characters."
+      });
+    }
+
+    // Process responsibilities and requirements
+    const processedResponsibilities = Array.isArray(responsibilities)
+      ? responsibilities
+      : responsibilities?.split('\n').filter(r => r.trim()).map(r => r.trim()) || [];
+
+    const processedRequirements = Array.isArray(requirements)
+      ? requirements
+      : requirements?.split('\n').filter(r => r.trim()).map(r => r.trim()) || [];
+
+    // Create job
     const job = await Job.create({
       title: title.trim(),
       language: language.trim(),
-      proficiencyLevel,
-      jobType,
+      proficiencyLevel: proficiencyLevel || 'Intermediate',
+      jobType: jobType || 'other',
       companyName: companyName.trim(),
-      location: location.trim(),
+      location: location?.trim() || 'Remote',
       isRemote: isRemote === true || isRemote === "true",
       description: description.trim(),
-      responsibilities,
-      requirements,
-      contactEmail: contactEmail.toLowerCase()
+      responsibilities: processedResponsibilities,
+      requirements: processedRequirements,
+      contactEmail: contactEmail.toLowerCase().trim()
     });
 
     res.status(201).json({
       success: true,
-      message: "Job listed successfully",
+      message: "Job posted successfully! It will be live for 7 days.",
       jobId: job._id,
       expiryDate: job.expiryDate
     });
   } catch (err) {
     console.error("Create job error:", err);
-    res.status(500).json({ success: false, message: "Failed to create job" });
+    
+    // Handle Mongoose validation errors
+    if (err.name === 'ValidationError') {
+      const errors = Object.values(err.errors).map(e => e.message);
+      return res.status(400).json({ 
+        success: false, 
+        error: errors.join(', ') 
+      });
+    }
+
+    res.status(500).json({ 
+      success: false, 
+      error: "Failed to create job. Please try again." 
+    });
   }
 };
 
