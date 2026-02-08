@@ -1,53 +1,40 @@
-// models/Job.js
+// models/Job.js - SUPER SIMPLE - MINIMAL VALIDATION
 import mongoose from "mongoose";
 
 const jobSchema = new mongoose.Schema(
   {
     title: {
       type: String,
-      required: [true, 'Job title is required'],
-      trim: true,
-      maxlength: [200, 'Job title cannot exceed 200 characters']
+      required: true,
+      trim: true
     },
     language: {
       type: String,
-      required: [true, 'Language is required'],
+      required: true,
       trim: true
     },
     proficiencyLevel: {
       type: String,
-      required: [true, 'Proficiency level is required'],
-      enum: {
-        values: ["Basic", "Intermediate", "Advanced", "Native"],
-        message: '{VALUE} is not a valid proficiency level'
-      }
+      required: true,
+      enum: ["Basic", "Intermediate", "Advanced", "Native"],
+      default: "Intermediate"
     },
     jobType: {
       type: String,
-      required: [true, 'Job type is required'],
-      enum: {
-        values: [
-          "translation",
-          "teaching",
-          "interpretation",
-          "content",
-          "assistance",
-          "research",
-          "other"
-        ],
-        message: '{VALUE} is not a valid job type'
-      }
+      required: true,
+      enum: ["translation", "teaching", "interpretation", "content", "assistance", "research", "other"],
+      default: "other"
     },
     companyName: {
       type: String,
-      required: [true, 'Company name is required'],
-      trim: true,
-      maxlength: [150, 'Company name cannot exceed 150 characters']
+      required: true,
+      trim: true
     },
     location: {
       type: String,
-      required: [true, 'Location is required'],
-      trim: true
+      required: true,
+      trim: true,
+      default: "Remote"
     },
     isRemote: {
       type: Boolean,
@@ -55,42 +42,22 @@ const jobSchema = new mongoose.Schema(
     },
     description: {
       type: String,
-      required: [true, 'Job description is required'],
-      trim: true,
-      minlength: [50, 'Description must be at least 50 characters'],
-      maxlength: [5000, 'Description cannot exceed 5000 characters']
+      required: true,
+      trim: true
     },
     responsibilities: {
       type: [String],
-      default: [],
-      validate: {
-        validator: function(v) {
-          return v.every(item => item.trim().length > 0);
-        },
-        message: 'All responsibilities must be non-empty'
-      }
+      default: []
     },
     requirements: {
       type: [String],
-      default: [],
-      validate: {
-        validator: function(v) {
-          return v.every(item => item.trim().length > 0);
-        },
-        message: 'All requirements must be non-empty'
-      }
+      default: []
     },
     contactEmail: {
       type: String,
-      required: [true, 'Contact email is required'],
+      required: true,
       lowercase: true,
-      trim: true,
-      validate: {
-        validator: function(v) {
-          return /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(v);
-        },
-        message: 'Please provide a valid email address'
-      }
+      trim: true
     },
     postedDate: {
       type: Date,
