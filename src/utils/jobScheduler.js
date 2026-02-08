@@ -54,3 +54,4 @@ const initializeJobSchedulers = () => {
   scheduleJobCleanup();
 };
 
+export { initializeJobSchedulers };
