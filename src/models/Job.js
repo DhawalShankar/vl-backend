@@ -91,11 +91,15 @@ const jobSchema = new mongoose.Schema(
 jobSchema.index({ language: 1, status: 1 });
 jobSchema.index({ jobType: 1, status: 1 });
 jobSchema.index({ status: 1, postedDate: -1 });
+
+// ✅ FIXED: Text index with language override prevention
 jobSchema.index({
   title: "text",
   description: "text",
-  companyName: "text",
-//   language: "text"
+  companyName: "text"
+}, {
+  default_language: "none",  // Don't use language-specific stemming
+  language_override: "searchLanguage"  // Prevents MongoDB from using 'language' field for text search
 });
 
 /* Virtuals */
@@ -108,7 +112,7 @@ jobSchema.virtual("isExpired").get(function () {
   return new Date() > this.expiryDate;
 });
 
-/* ✅ FIXED MIDDLEWARE - next() removed */
+/* Middleware */
 jobSchema.pre("save", async function () {
   if (this.isNew && !this.expiryDate) {
     const d = new Date();
@@ -118,18 +122,15 @@ jobSchema.pre("save", async function () {
   if (this.isExpired) {
     this.status = "expired";
   }
-  // No next() needed in async middleware
 });
 
-/* Statics */
+/* Static Methods */
 jobSchema.statics.getActiveJobs = function (filters = {}) {
   const query = { status: "active", expiryDate: { $gt: new Date() } };
-
   if (filters.language) query.language = new RegExp(filters.language, "i");
   if (filters.jobType) query.jobType = filters.jobType;
   if (filters.isRemote !== undefined) query.isRemote = filters.isRemote;
   if (filters.search) query.$text = { $search: filters.search };
-
   return this.find(query).sort({ postedDate: -1 });
 };
 
@@ -142,7 +143,6 @@ jobSchema.statics.markExpiredJobs = function () {
 
 jobSchema.statics.getJobStats = async function () {
   const now = new Date();
-
   const [stats] = await this.aggregate([
     {
       $facet: {
@@ -154,18 +154,18 @@ jobSchema.statics.getJobStats = async function () {
       }
     }
   ]);
-
   return {
     totalJobs: stats.totalJobs[0]?.count || 0,
     activeJobs: stats.activeJobs[0]?.count || 0
   };
 };
 
-/* Methods */
+/* Instance Methods */
 jobSchema.methods.incrementViews = function () {
   this.views += 1;
   return this.save();
 };
 
 const Job = mongoose.model("Job", jobSchema);
+
 export default Job;
