@@ -42,7 +42,7 @@ export const deleteNotification = async (req, res) => {
   }
 };
 
-// Delete all message notifications (for when visiting chats page)
+// ✅ Delete all message notifications (for when visiting chats page)
 export const deleteAllMessageNotifications = async (req, res) => {
   try {
     const userId = req.user.userId;

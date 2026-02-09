@@ -4,18 +4,18 @@ import {
   getMyNotifications, 
   deleteAllMessageNotifications,
   deleteNotification,
-  deleteNotificationsForChat, // ✅ NEW
   getUnreadCount
 } from "../controllers/notification.controller.js";
 import { protect } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
-// notification.routes.js
+// ✅ GET routes
 router.get("/", protect, getMyNotifications);
-router.delete("/messages/all", protect, deleteAllMessageNotifications); 
-router.get("/unread/count", protect, getUnreadCount);
+router.get("/unread-count", protect, getUnreadCount); // ⚠️ Changed from /unread/count
+
+// ✅ DELETE routes - specific before generic
+router.delete("/messages/all", protect, deleteAllMessageNotifications);
 router.delete("/:notificationId", protect, deleteNotification);
-router.delete("/chat/:chatId", protect, deleteNotificationsForChat);
 
 export default router;
