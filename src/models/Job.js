@@ -1,4 +1,4 @@
-// models/Job.js - FIXED VERSION
+// models/Job.js - WITH USER REFERENCE
 import mongoose from "mongoose";
 
 const jobSchema = new mongoose.Schema(
@@ -59,6 +59,18 @@ const jobSchema = new mongoose.Schema(
       lowercase: true,
       trim: true
     },
+    // ✅ NEW FIELDS FOR USER TRACKING
+    postedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true
+    },
+    postedByName: {
+      type: String,
+      required: true,
+      trim: true
+    },
     postedDate: {
       type: Date,
       default: Date.now,
@@ -91,6 +103,7 @@ const jobSchema = new mongoose.Schema(
 jobSchema.index({ language: 1, status: 1 });
 jobSchema.index({ jobType: 1, status: 1 });
 jobSchema.index({ status: 1, postedDate: -1 });
+jobSchema.index({ postedBy: 1, status: 1 });  // ← NEW INDEX
 
 // ✅ FIXED: Text index with language override prevention
 jobSchema.index({
@@ -98,8 +111,8 @@ jobSchema.index({
   description: "text",
   companyName: "text"
 }, {
-  default_language: "none",  // Don't use language-specific stemming
-  language_override: "searchLanguage"  // Prevents MongoDB from using 'language' field for text search
+  default_language: "none",
+  language_override: "searchLanguage"
 });
 
 /* Virtuals */
