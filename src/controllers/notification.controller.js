@@ -21,46 +21,6 @@ export const getMyNotifications = async (req, res) => {
   }
 };
 
-export const markAsRead = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const { notificationId } = req.params;
-
-    const notification = await Notification.findOne({
-      _id: notificationId,
-      recipient: userId
-    });
-
-    if (!notification) {
-      return res.status(404).json({ error: "Notification not found" });
-    }
-
-    notification.read = true;
-    await notification.save();
-
-    res.json({ message: "Notification marked as read" });
-  } catch (error) {
-    console.error("Mark notification error:", error);
-    res.status(500).json({ error: "Failed to mark notification" });
-  }
-};
-
-export const markAllAsRead = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-
-    await Notification.updateMany(
-      { recipient: userId, read: false },
-      { read: true }
-    );
-
-    res.json({ message: "All notifications marked as read" });
-  } catch (error) {
-    console.error("Mark all notifications error:", error);
-    res.status(500).json({ error: "Failed to mark all notifications" });
-  }
-};
-
 export const deleteNotification = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -82,27 +42,25 @@ export const deleteNotification = async (req, res) => {
   }
 };
 
-// ✅ NEW: Delete all notifications for a specific chat
-export const deleteNotificationsForChat = async (req, res) => {
+// Delete all message notifications (for when visiting chats page)
+export const deleteAllMessageNotifications = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { chatId } = req.params;
-
+    
     const result = await Notification.deleteMany({
       recipient: userId,
-      chatId: chatId,
       type: "new_message"
     });
-
-    console.log(`✅ Deleted ${result.deletedCount} notifications for chat ${chatId}`);
-
+    
+    console.log(`✅ Deleted ${result.deletedCount} message notifications for user ${userId}`);
+    
     res.json({ 
-      message: "Chat notifications deleted",
+      message: "All message notifications deleted",
       count: result.deletedCount
     });
   } catch (error) {
-    console.error("Delete chat notifications error:", error);
-    res.status(500).json({ error: "Failed to delete chat notifications" });
+    console.error("Delete all message notifications error:", error);
+    res.status(500).json({ error: "Failed to delete message notifications" });
   }
 };
 
@@ -111,8 +69,7 @@ export const getUnreadCount = async (req, res) => {
     const userId = req.user.userId;
 
     const count = await Notification.countDocuments({
-      recipient: userId,
-      read: false
+      recipient: userId
     });
 
     res.json({ count });
