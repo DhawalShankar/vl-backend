@@ -2,8 +2,7 @@
 import { Router } from "express";
 import { 
   getMyNotifications, 
-  markAsRead, 
-  markAllAsRead,
+  deleteAllMessageNotifications,
   deleteNotification,
   deleteNotificationsForChat, // ✅ NEW
   getUnreadCount
@@ -12,11 +11,11 @@ import { protect } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
+// notification.routes.js
 router.get("/", protect, getMyNotifications);
-router.get("/unread-count", protect, getUnreadCount);
-router.patch("/:notificationId/read", protect, markAsRead);
-router.patch("/mark-all-read", protect, markAllAsRead);
+router.delete("/messages/all", protect, deleteAllMessageNotifications); 
+router.get("/unread/count", protect, getUnreadCount);
 router.delete("/:notificationId", protect, deleteNotification);
-router.delete("/chat/:chatId", protect, deleteNotificationsForChat); // ✅ NEW
+router.delete("/chat/:chatId", protect, deleteNotificationsForChat);
 
 export default router;
