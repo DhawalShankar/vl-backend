@@ -36,40 +36,26 @@ export const initializeSocket = (server) => {
     }
   });
 
-  io.on('connection', (socket) => {
-    console.log(`✅ User ${socket.userId} connected to socket`);
-    
-    // Join user-specific room
-    socket.join(`user_${socket.userId}`);
-    console.log(`📍 User ${socket.userId} joined room: user_${socket.userId}`);
+ io.on('connection', (socket) => {
+  console.log(`✅ User ${socket.userId} connected`);
 
-    // Optional: Track online status
-    socket.on('user_online', () => {
-      socket.broadcast.emit('user_status', { 
-        userId: socket.userId, 
-        status: 'online' 
-      });
-    });
+  // user room (for direct emits if needed later)
+  socket.join(`user_${socket.userId}`);
 
-    // ✅ FIXED: Accept room name directly (frontend already sends with chat_ prefix)
-    socket.on('join_chat', (roomName) => {
-      socket.join(roomName);  // ✅ Direct room name, NO prefix added
-      console.log(`💬 User ${socket.userId} joined room: ${roomName}`);
-    });
-
-    socket.on('leave_chat', (roomName) => {
-      socket.leave(roomName);  // ✅ Direct room name, NO prefix added
-      console.log(`👋 User ${socket.userId} left room: ${roomName}`);
-    });
-
-    socket.on('disconnect', () => {
-      console.log(`❌ User ${socket.userId} disconnected`);
-      socket.broadcast.emit('user_status', { 
-        userId: socket.userId, 
-        status: 'offline' 
-      });
-    });
+  socket.on('join_chat', (roomName) => {
+    socket.join(roomName);
+    console.log(`💬 Joined ${roomName}`);
   });
+
+  socket.on('leave_chat', (roomName) => {
+    socket.leave(roomName);
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`❌ User ${socket.userId} disconnected`);
+  });
+});
+
 
   return io;
 };
