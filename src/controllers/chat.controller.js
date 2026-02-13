@@ -2,8 +2,8 @@
 import Chat from "../models/Chat.js";
 import User from "../models/User.js";
 import Notification from "../models/Notification.js"; // ✅ Import Notification model
-import { createTransport } from "nodemailer";
 import { getIO, emitToChat } from "../socket.js";
+import Report from "../models/Report.js"; // Create Report model
 
 export const getMyChats = async (req, res) => {
   try {
@@ -333,6 +333,8 @@ export const deleteChat = async (req, res) => {
   }
 };
 
+
+
 export const reportUser = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -348,32 +350,19 @@ export const reportUser = async (req, res) => {
 
     const reportedUser = chat.participants.find(p => p._id.toString() !== userId);
 
-    // ✅ YAHAAN CHANGE - createTransport use karo
-    const transporter = createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-      }
+    // ✅ Save to database
+    await Report.create({
+      reporter: userId,
+      reportedUser: reportedUser._id,
+      chatId: chatId,
+      reason: reason || 'No reason provided',
+      timestamp: new Date()
     });
 
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: 'vartalang@gmail.com',  // ✅ Real email use karo
-      subject: `User Report - VartaLang`,
-      html: `
-        <h2>User Report</h2>
-        <p><strong>Reporter:</strong> ${reporter.name} (${reporter.email})</p>
-        <p><strong>Reported User:</strong> ${reportedUser.name} (${reportedUser.email})</p>
-        <p><strong>Reason:</strong> ${reason || 'No reason provided'}</p>
-        <p><strong>Chat ID:</strong> ${chatId}</p>
-        <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
-      `
-    });
-
+    console.log('📝 Report saved to database');
     res.json({ message: "Report submitted successfully" });
   } catch (error) {
-    console.error("Report user error:", error);
+    console.error("Report error:", error);
     res.status(500).json({ error: "Failed to submit report" });
   }
 };

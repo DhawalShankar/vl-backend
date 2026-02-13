@@ -3,7 +3,115 @@ import Job from '../models/Job.js';
 import User from '../models/User.js';
 import Chat from '../models/Chat.js';
 import Match from '../models/Match.js';
+import Report from '../models/Report.js';
 
+export const getReports = async (req, res) => {
+  try {
+    const reports = await Report.find()
+      .populate('reporter', 'name email')
+      .populate('reportedUser', 'name email')
+      .populate('chatId')  // Optional: agar chat details chahiye
+      .sort({ timestamp: -1 });
+    
+    res.json({ 
+      success: true,
+      reports,
+      count: reports.length 
+    });
+  } catch (error) {
+    console.error("Get reports error:", error);
+    res.status(500).json({ 
+      success: false,
+      error: "Failed to fetch reports" 
+    });
+  }
+};
+
+// ✅ Delete report (mark as reviewed and delete)
+export const deleteReport = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+
+    const report = await Report.findByIdAndDelete(reportId);
+
+    if (!report) {
+      return res.status(404).json({ 
+        success: false,
+        error: "Report not found" 
+      });
+    }
+
+    console.log(`🗑️ Admin deleted/reviewed report ${reportId}`);
+
+    res.json({ 
+      success: true,
+      message: "Report reviewed and deleted successfully"
+    });
+  } catch (error) {
+    console.error("Delete report error:", error);
+    res.status(500).json({ 
+      success: false,
+      error: "Failed to delete report" 
+    });
+  }
+};
+
+// ✅ OPTIONAL: Bulk delete all reports
+export const deleteAllReports = async (req, res) => {
+  try {
+    const result = await Report.deleteMany({});
+
+    console.log(`🗑️ Admin cleared ${result.deletedCount} reports`);
+
+    res.json({ 
+      success: true,
+      message: `Deleted ${result.deletedCount} reports`,
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error("Delete all reports error:", error);
+    res.status(500).json({ 
+      success: false,
+      error: "Failed to delete reports" 
+    });
+  }
+};
+
+// ✅ Get single report details (for review)
+export const getReportById = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+
+    const report = await Report.findById(reportId)
+      .populate('reporter', 'name email languagesKnow primaryLanguageToLearn')
+      .populate('reportedUser', 'name email languagesKnow primaryLanguageToLearn')
+      .populate({
+        path: 'chatId',
+        populate: {
+          path: 'participants',
+          select: 'name email'
+        }
+      });
+
+    if (!report) {
+      return res.status(404).json({ 
+        success: false,
+        error: "Report not found" 
+      });
+    }
+
+    res.json({ 
+      success: true,
+      report
+    });
+  } catch (error) {
+    console.error("Get report error:", error);
+    res.status(500).json({ 
+      success: false,
+      error: "Failed to fetch report" 
+    });
+  }
+};
 // ✅ Get all jobs (including expired)
 export const getAllJobs = async (req, res) => {
   try {

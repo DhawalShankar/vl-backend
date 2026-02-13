@@ -6,20 +6,30 @@ import {
   deleteAnyJob,
   getPlatformStats,
   checkAdminStatus,
-  getAllUsers
+  getAllUsers,
+  getReports,
+  deleteReport,        // ✅ NEW
+  deleteAllReports,    // ✅ NEW
+  getReportById        // ✅ NEW
 } from '../controllers/admin.controller.js';
 import { protect } from '../middlewares/auth.middleware.js';
 import { adminOnly } from '../middlewares/admin.middleware.js';
 
 const router = express.Router();
 
-// ✅ Check admin status (only needs auth, not admin access)
 router.get('/check', protect, checkAdminStatus);
 
-// ✅ All routes below require admin access
+// ✅ Admin-only routes
 router.get('/stats', protect, adminOnly, getPlatformStats);
 router.get('/jobs', protect, adminOnly, getAllJobs);
 router.get('/users', protect, adminOnly, getAllUsers);
+
+// ✅ Reports routes
+router.get('/reports', protect, adminOnly, getReports);
+router.get('/reports/:reportId', protect, adminOnly, getReportById);
+router.delete('/reports/:reportId', protect, adminOnly, deleteReport);
+router.delete('/reports/bulk/all', protect, adminOnly, deleteAllReports);  // Careful!
+
 router.put('/jobs/:jobId/extend', protect, adminOnly, extendJobDuration);
 router.delete('/jobs/:jobId', protect, adminOnly, deleteAnyJob);
 
