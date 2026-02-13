@@ -5,12 +5,14 @@ import Chat from '../models/Chat.js';
 import Match from '../models/Match.js';
 import Report from '../models/Report.js';
 
+// ✅ Get all reports (admin only)
 export const getReports = async (req, res) => {
   try {
     const reports = await Report.find()
       .populate('reporter', 'name email')
       .populate('reportedUser', 'name email')
-      .populate('chatId')  // Optional: agar chat details chahiye
+      // ❌ Remove this - we only need the chatId string, not full chat object
+      // .populate('chatId')
       .sort({ timestamp: -1 });
     
     res.json({ 
@@ -77,7 +79,7 @@ export const deleteAllReports = async (req, res) => {
   }
 };
 
-// ✅ Get single report details (for review)
+// ✅ Get single report details (for detailed review - with full chat context)
 export const getReportById = async (req, res) => {
   try {
     const { reportId } = req.params;
