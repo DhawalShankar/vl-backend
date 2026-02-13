@@ -1,4 +1,4 @@
-// job.controller.js - COMPLETE FIXED VERSION WITH ONE JOB PER USER LIMIT
+// job.controller.js - COMPLETE WITH SALARY FIELDS SUPPORT
 import Job from "../models/Job.js";
 import User from "../models/User.js";
 
@@ -113,7 +113,13 @@ export const createJob = async (req, res) => {
       description,
       responsibilities,
       requirements,
-      contactEmail
+      contactEmail,
+      // ✅ NEW SALARY FIELDS
+      salaryMin,
+      salaryMax,
+      salaryCurrency,
+      salaryPeriod,
+      employmentType
     } = req.body;
 
     // REQUIRED FIELDS CHECK
@@ -121,6 +127,14 @@ export const createJob = async (req, res) => {
       return res.status(400).json({ 
         success: false, 
         error: "Please fill all required fields" 
+      });
+    }
+
+    // ✅ VALIDATE SALARY RANGE
+    if (salaryMin && salaryMax && Number(salaryMin) > Number(salaryMax)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Minimum salary cannot be greater than maximum salary" 
       });
     }
 
@@ -133,8 +147,8 @@ export const createJob = async (req, res) => {
       ? requirements
       : requirements?.split('\n').filter(r => r.trim()).map(r => r.trim()) || [];
 
-    // ✅ CREATE JOB WITH CORRECT USER ID
-    const job = await Job.create({
+    // ✅ CREATE JOB WITH ALL FIELDS
+    const jobData = {
       title: title.trim(),
       language: language.trim(),
       proficiencyLevel: proficiencyLevel || 'Intermediate',
@@ -146,9 +160,18 @@ export const createJob = async (req, res) => {
       responsibilities: processedResponsibilities,
       requirements: processedRequirements,
       contactEmail: contactEmail.trim().toLowerCase(),
-      postedBy: req.user.userId,        // ✅ FIX
-      postedByName: user.name            // ✅ FIX
-    });
+      postedBy: req.user.userId,
+      postedByName: user.name
+    };
+
+    // ✅ ADD SALARY FIELDS IF PROVIDED
+    if (salaryMin) jobData.salaryMin = Number(salaryMin);
+    if (salaryMax) jobData.salaryMax = Number(salaryMax);
+    if (salaryCurrency) jobData.salaryCurrency = salaryCurrency;
+    if (salaryPeriod) jobData.salaryPeriod = salaryPeriod;
+    if (employmentType) jobData.employmentType = employmentType;
+
+    const job = await Job.create(jobData);
 
     // Populate before sending response
     await job.populate('postedBy', 'name email');
@@ -164,9 +187,10 @@ export const createJob = async (req, res) => {
     console.error("Create job error:", err);
     
     if (err.name === 'ValidationError') {
+      const errorMessages = Object.values(err.errors).map(e => e.message);
       return res.status(400).json({ 
         success: false, 
-        error: "Please check your input and try again" 
+        error: errorMessages[0] || "Please check your input and try again" 
       });
     }
 
@@ -225,7 +249,7 @@ export const deleteJob = async (req, res) => {
       });
     }
 
-    // ✅ CHECK OWNERSHIP - FIX
+    // ✅ CHECK OWNERSHIP
     if (job.postedBy.toString() !== req.user.userId.toString()) {
       return res.status(403).json({ 
         success: false, 
@@ -257,7 +281,6 @@ export const getMyJobs = async (req, res) => {
       });
     }
 
-    // ✅ FIX: Use req.user.userId
     const jobs = await Job.find({ postedBy: req.user.userId })
       .sort({ postedDate: -1 })
       .select("-__v");

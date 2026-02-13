@@ -1,4 +1,4 @@
-// models/Job.js - WITH USER REFERENCE
+// models/Job.js - COMPLETE WITH SALARY FIELDS
 import mongoose from "mongoose";
 
 const jobSchema = new mongoose.Schema(
@@ -24,6 +24,30 @@ const jobSchema = new mongoose.Schema(
       required: true,
       enum: ["translation", "teaching", "interpretation", "content", "assistance", "research", "other"],
       default: "other"
+    },
+    // ✅ NEW SALARY FIELDS
+    salaryMin: {
+      type: Number,
+      min: 0
+    },
+    salaryMax: {
+      type: Number,
+      min: 0
+    },
+    salaryCurrency: {
+      type: String,
+      enum: ['INR', 'USD'],
+      default: 'INR'
+    },
+    salaryPeriod: {
+      type: String,
+      enum: ['hour', 'month', 'year'],
+      default: 'month'
+    },
+    employmentType: {
+      type: String,
+      enum: ['full-time', 'part-time', 'contract', 'freelance'],
+      default: 'full-time'
     },
     companyName: {
       type: String,
@@ -59,7 +83,7 @@ const jobSchema = new mongoose.Schema(
       lowercase: true,
       trim: true
     },
-    // ✅ NEW FIELDS FOR USER TRACKING
+    // USER TRACKING FIELDS
     postedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -103,9 +127,9 @@ const jobSchema = new mongoose.Schema(
 jobSchema.index({ language: 1, status: 1 });
 jobSchema.index({ jobType: 1, status: 1 });
 jobSchema.index({ status: 1, postedDate: -1 });
-jobSchema.index({ postedBy: 1, status: 1 });  // ← NEW INDEX
+jobSchema.index({ postedBy: 1, status: 1 });
 
-// ✅ FIXED: Text index with language override prevention
+// Text index with language override prevention
 jobSchema.index({
   title: "text",
   description: "text",
@@ -126,15 +150,25 @@ jobSchema.virtual("isExpired").get(function () {
 });
 
 /* Middleware */
-jobSchema.pre("save", async function () {
+jobSchema.pre("save", async function (next) {
+  // Set expiry date for new jobs
   if (this.isNew && !this.expiryDate) {
     const d = new Date();
     d.setDate(d.getDate() + 7);
     this.expiryDate = d;
   }
+  
+  // Mark as expired if past expiry date
   if (this.isExpired) {
     this.status = "expired";
   }
+
+  // ✅ Validate salary range
+  if (this.salaryMin && this.salaryMax && this.salaryMin > this.salaryMax) {
+    return next(new Error('Minimum salary cannot be greater than maximum salary'));
+  }
+  
+  next();
 });
 
 /* Static Methods */
