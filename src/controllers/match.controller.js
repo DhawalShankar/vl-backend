@@ -84,7 +84,15 @@ export const handleSwipe = async (req, res) => {
     });
 
     if (existingMatch) {
-      // ✅ Handle mutual match case
+      // ✅ Check WHO created the existing match
+      const iAmUser1 = existingMatch.user1.toString() === userId;
+      
+      // If I'm user1, I already swiped - don't allow double swipe
+      if (iAmUser1) {
+        return res.status(400).json({ error: "You already swiped on this user" });
+      }
+      
+      // ✅ Handle mutual match case (only if I'm user2)
       if (existingMatch.status === 'pending' && action === 'like') {
         console.log(`🎉 MUTUAL MATCH! User ${userId} and ${targetUserId} matched!`);
 
