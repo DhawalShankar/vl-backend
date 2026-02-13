@@ -359,7 +359,7 @@ export const reportUser = async (req, res) => {
 
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
-      to: 'mymail@gmail.com',
+      to: 'vartalang@gmail.com',
       subject: `User Report - VartaLang`,
       html: `
         <h2>User Report</h2>
