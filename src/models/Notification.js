@@ -1,12 +1,11 @@
-// models/Notification.js - SIMPLIFIED VERSION
+// models/Notification.js - FIXED VERSION
 import mongoose from "mongoose";
 
 const NotificationSchema = new mongoose.Schema({
   recipient: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: "User", 
-    required: true,
-    index: true
+    required: true
   },
   
   sender: { 
@@ -25,7 +24,6 @@ const NotificationSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId, 
     ref: "Match",
     required: function() {
-      // Only required for match-related notifications
       return ['match_request', 'match_accepted', 'match_rejected'].includes(this.type);
     }
   },
@@ -34,7 +32,6 @@ const NotificationSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId, 
     ref: "Chat",
     required: function() {
-      // Only required for message notifications
       return this.type === 'new_message';
     }
   },
@@ -47,44 +44,37 @@ const NotificationSchema = new mongoose.Schema({
   
   read: { 
     type: Boolean, 
-    default: false,
-    index: true
+    default: false
   },
   
   createdAt: { 
     type: Date, 
-    default: Date.now,
-    immutable: true
-  },
-  
-  expiresAt: { 
-    type: Date, 
-    default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-    index: true
+    default: Date.now
   }
-}, {
-  timestamps: false
 });
 
-// ✅ INDEXES for performance
+// Indexes
 NotificationSchema.index({ recipient: 1, createdAt: -1 });
 NotificationSchema.index({ recipient: 1, type: 1, createdAt: -1 });
 NotificationSchema.index({ recipient: 1, read: 1 });
-NotificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 NotificationSchema.index({ matchId: 1 });
 NotificationSchema.index({ chatId: 1 });
 
-// ✅ INSTANCE METHODS
-NotificationSchema.methods.markAsRead = async function() {
-  this.read = true;
-  return this.save();
-};
+// ✅ FIXED: Proper pre-save hook
+NotificationSchema.pre('save', function(next) {
+  console.log(`🔔 Creating notification: ${this.type} for ${this.recipient}`);
+  next(); // ✅ Always call next()
+});
 
-NotificationSchema.methods.isExpired = function() {
-  return this.expiresAt < new Date();
-};
+// ✅ FIXED: Proper post-save success hook
+NotificationSchema.post('save', function(doc) {
+  console.log(`✅ Notification saved: ${doc._id}`);
+});
 
-// ✅ STATIC METHODS
+// ✅ REMOVED: The broken error handler that was causing "next is not a function"
+// The error handler middleware signature is different and was causing issues
+
+// Static methods
 NotificationSchema.statics.getUnreadCount = async function(userId) {
   return this.countDocuments({ recipient: userId, read: false });
 };
@@ -107,29 +97,14 @@ NotificationSchema.statics.deleteByMatch = async function(matchId) {
   return this.deleteMany({ matchId });
 };
 
-// ✅ MIDDLEWARE - Simplified validation
-NotificationSchema.pre('save', function(next) {
-  console.log(`🔔 Pre-save hook: Creating ${this.type} notification`);
-  console.log(`📝 Data:`, {
-    recipient: this.recipient,
-    sender: this.sender,
-    type: this.type,
-    matchId: this.matchId,
-    chatId: this.chatId
-  });
-  next();
-});
+// Instance methods
+NotificationSchema.methods.markAsRead = async function() {
+  this.read = true;
+  return this.save();
+};
 
-NotificationSchema.post('save', function(doc) {
-  console.log(`✅ Notification saved successfully: ${doc._id}`);
-  console.log(`📬 Type: ${doc.type} for user ${doc.recipient}`);
-});
-
-NotificationSchema.post('save', function(error, doc, next) {
-  if (error) {
-    console.error(`❌ Post-save error:`, error);
-  }
-  next(error);
-});
+NotificationSchema.methods.isExpired = function() {
+  return this.expiresAt && this.expiresAt < new Date();
+};
 
 export default mongoose.model("Notification", NotificationSchema);

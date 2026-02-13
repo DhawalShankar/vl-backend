@@ -2,7 +2,6 @@ import Match from "../models/Match.js";
 import User from "../models/User.js";
 import Chat from "../models/Chat.js";
 import Notification from "../models/Notification.js";
-// ✅ NO Socket.IO import for match notifications - only for chat
 
 export const getPotentialMatches = async (req, res) => {
   try {
@@ -13,7 +12,7 @@ export const getPotentialMatches = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // ✅ Exclude users with accepted matches in BOTH directions
+    // Exclude users with accepted matches in BOTH directions
     const acceptedMatches = await Match.find({
       $or: [
         { user1: userId, status: "accepted" },
@@ -25,7 +24,7 @@ export const getPotentialMatches = async (req, res) => {
       match.user1.toString() === userId ? match.user2.toString() : match.user1.toString()
     );
 
-    // ✅ Exclude users you've interacted with in ANY direction
+    // Exclude users you've interacted with in ANY direction
     const existingInteractions = await Match.find({
       $or: [
         { user1: userId },
@@ -54,8 +53,6 @@ export const getPotentialMatches = async (req, res) => {
     }).select("-password").limit(20);
 
     console.log(`📋 Found ${potentialMatches.length} potential matches for user ${userId}`);
-    console.log(`🔍 User wants to learn: ${languageIWantToLearn}`);
-    console.log(`🔍 User knows: ${languagesIKnow.join(', ')}`);
 
     res.json({ matches: potentialMatches });
   } catch (error) {
@@ -75,7 +72,7 @@ export const handleSwipe = async (req, res) => {
       return res.status(400).json({ error: "Invalid action" });
     }
 
-    // ✅ Check if match exists in EITHER direction
+    // Check if match exists in EITHER direction
     const existingMatch = await Match.findOne({
       $or: [
         { user1: userId, user2: targetUserId },
@@ -84,7 +81,7 @@ export const handleSwipe = async (req, res) => {
     });
 
     if (existingMatch) {
-      // ✅ Check WHO created the existing match
+      // Check WHO created the existing match
       const iAmUser1 = existingMatch.user1.toString() === userId;
       
       // If I'm user1, I already swiped - don't allow double swipe
@@ -92,7 +89,7 @@ export const handleSwipe = async (req, res) => {
         return res.status(400).json({ error: "You already swiped on this user" });
       }
       
-      // ✅ Handle mutual match case (only if I'm user2)
+      // Handle mutual match case (only if I'm user2)
       if (existingMatch.status === 'pending' && action === 'like') {
         console.log(`🎉 MUTUAL MATCH! User ${userId} and ${targetUserId} matched!`);
 
@@ -112,27 +109,26 @@ export const handleSwipe = async (req, res) => {
           });
         }
 
-        // ✅ Delete any pending match_request notifications
+        // Delete any pending match_request notifications
         await Notification.deleteMany({
           matchId: existingMatch._id,
           type: "match_request"
         });
 
-        // ✅ Create notifications for BOTH users (HTTP polling will fetch)
-        await Promise.all([
-          Notification.create({
-            recipient: userId,
-            sender: targetUserId,
-            type: "match_accepted",
-            matchId: existingMatch._id
-          }),
-          Notification.create({
-            recipient: targetUserId,
-            sender: userId,
-            type: "match_accepted",
-            matchId: existingMatch._id
-          })
-        ]);
+        // Create notifications for BOTH users
+        await Notification.create({
+          recipient: userId,
+          sender: targetUserId,
+          type: "match_accepted",
+          matchId: existingMatch._id
+        });
+
+        await Notification.create({
+          recipient: targetUserId,
+          sender: userId,
+          type: "match_accepted",
+          matchId: existingMatch._id
+        });
 
         console.log(`✅ Match accepted notifications created for both users`);
 
@@ -167,62 +163,27 @@ export const handleSwipe = async (req, res) => {
       status: "pending"
     });
 
-    console.log(`✅ Match created with ID: ${match._id}`);
-    console.log(`📝 Match details:`, { user1: userId, user2: targetUserId, status: 'pending' });
+    console.log(`✅ Match created: ${match._id}`);
 
-    // ✅ Create notification with DETAILED error handling
-    try {
-      console.log(`🔔 Attempting to create notification...`);
-      console.log(`📝 Notification data:`, {
-        recipient: targetUserId,
-        sender: userId,
-        type: "match_request",
-        matchId: match._id
-      });
+    // Create notification
+    const notification = await Notification.create({
+      recipient: targetUserId,
+      sender: userId,
+      type: "match_request",
+      matchId: match._id
+    });
 
-      const notification = await Notification.create({
-        recipient: targetUserId,
-        sender: userId,
-        type: "match_request",
-        matchId: match._id
-      });
-
-      console.log(`✅ Notification created successfully with ID: ${notification._id}`);
-      console.log(`💌 Match request sent from ${userId} to ${targetUserId}`);
-      
-      return res.json({ 
-        message: "Match request sent", 
-        matched: false,
-        match,
-        notificationCreated: true
-      });
-
-    } catch (notifError) {
-      console.error("❌ NOTIFICATION CREATE ERROR:", notifError);
-      console.error("Error name:", notifError.name);
-      console.error("Error message:", notifError.message);
-      
-      if (notifError.errors) {
-        console.error("Validation errors:", JSON.stringify(notifError.errors, null, 2));
-      }
-      
-      if (notifError.stack) {
-        console.error("Stack trace:", notifError.stack);
-      }
-
-      // Still return success for match creation
-      return res.json({ 
-        message: "Match request sent (notification failed)", 
-        matched: false,
-        match,
-        notificationCreated: false,
-        notificationError: notifError.message
-      });
-    }
+    console.log(`✅ Notification created: ${notification._id}`);
+    console.log(`💌 Match request sent from ${userId} to ${targetUserId}`);
     
+    return res.json({ 
+      message: "Match request sent", 
+      matched: false,
+      match 
+    });
+
   } catch (error) {
-    console.error("❌ Handle swipe error:", error);
-    console.error("Error stack:", error.stack);
+    console.error("Handle swipe error:", error);
     res.status(500).json({ error: "Failed to process swipe" });
   }
 };
@@ -264,7 +225,7 @@ export const acceptMatch = async (req, res) => {
     const userId = req.user.userId;
     const { matchId } = req.params;
 
-    // ✅ Validate matchId format
+    // Validate matchId format
     if (!matchId || matchId === 'undefined' || matchId === 'null') {
       return res.status(400).json({ error: "Invalid match ID" });
     }
@@ -302,21 +263,20 @@ export const acceptMatch = async (req, res) => {
       type: "match_request"
     });
 
-    // ✅ Create notifications for BOTH users (HTTP polling will fetch)
-    await Promise.all([
-      Notification.create({
-        recipient: userId,
-        sender: match.user1,
-        type: "match_accepted",
-        matchId: match._id
-      }),
-      Notification.create({
-        recipient: match.user1,
-        sender: userId,
-        type: "match_accepted",
-        matchId: match._id
-      })
-    ]);
+    // Create notifications for BOTH users
+    await Notification.create({
+      recipient: userId,
+      sender: match.user1,
+      type: "match_accepted",
+      matchId: match._id
+    });
+
+    await Notification.create({
+      recipient: match.user1,
+      sender: userId,
+      type: "match_accepted",
+      matchId: match._id
+    });
 
     console.log(`✅ User ${userId} accepted match request from ${match.user1}`);
     console.log(`✅ Match accepted notifications created for both users`);
@@ -337,7 +297,7 @@ export const rejectMatch = async (req, res) => {
     const userId = req.user.userId;
     const { matchId } = req.params;
 
-    // ✅ Validate matchId format
+    // Validate matchId format
     if (!matchId || matchId === 'undefined' || matchId === 'null') {
       return res.status(400).json({ error: "Invalid match ID" });
     }
