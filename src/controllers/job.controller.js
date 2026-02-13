@@ -1,6 +1,6 @@
-// job.controller.js - COMPLETE FIXED VERSION
+// job.controller.js - COMPLETE FIXED VERSION WITH ONE JOB PER USER LIMIT
 import Job from "../models/Job.js";
-import User from "../models/User.js";  // ← ADD THIS
+import User from "../models/User.js";
 
 /* -------------------- CONTROLLERS -------------------- */
 
@@ -79,6 +79,20 @@ export const createJob = async (req, res) => {
       });
     }
 
+    // ✅ CHECK IF USER ALREADY HAS A JOB POSTED
+    const existingJob = await Job.findOne({ 
+      postedBy: req.user.userId,
+      status: "active",
+      expiryDate: { $gt: new Date() }
+    });
+
+    if (existingJob) {
+      return res.status(403).json({ 
+        success: false, 
+        error: "You already have an active job posting. Each user can only post one job at a time. For extensions or additional postings, please contact vartalang@gmail.com" 
+      });
+    }
+
     // ✅ FETCH USER DETAILS
     const user = await User.findById(req.user.userId).select('name email');
     if (!user) {
@@ -141,7 +155,7 @@ export const createJob = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: "Job posted successfully! It will be live for 7 days.",
+      message: "Job posted successfully! It will be live for 7 days. Note: Each user can only have one active job posting at a time. For extensions, contact vartalang@gmail.com",
       jobId: job._id,
       expiryDate: job.expiryDate,
       job
@@ -222,7 +236,7 @@ export const deleteJob = async (req, res) => {
     await job.deleteOne();
     res.json({ 
       success: true, 
-      message: "Job deleted successfully" 
+      message: "Job deleted successfully. You can now post a new job if needed." 
     });
   } catch (err) {
     console.error("Delete job error:", err);
@@ -251,7 +265,12 @@ export const getMyJobs = async (req, res) => {
     res.json({ 
       success: true, 
       jobs,
-      count: jobs.length 
+      count: jobs.length,
+      message: jobs.length === 0 
+        ? "You haven't posted any jobs yet. You can post one job for free (7 days)." 
+        : jobs.length === 1 && jobs[0].status === "active" 
+          ? "You have reached your limit of 1 active job. For extensions or additional postings, contact vartalang@gmail.com"
+          : "For job extensions or additional postings, contact vartalang@gmail.com"
     });
   } catch (err) {
     console.error("Get my jobs error:", err);
