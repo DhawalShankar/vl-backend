@@ -1,7 +1,7 @@
 import User from "../models/User.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-
+import { OAuth2Client } from 'google-auth-library'; // ← NAYA IMPORT
 export const signup = async (req, res) => {
   try {
     const { email, password, name, primaryLanguageToLearn, languagesKnow, state } = req.body;
@@ -146,5 +146,112 @@ export const updateProfile = async (req, res) => {
   } catch (error) {
     console.error("Update profile error:", error);
     res.status(500).json({ error: "Failed to update profile" });
+  }
+};
+
+
+// ⬇️⬇️⬇️ NAYE GOOGLE FUNCTIONS ⬇️⬇️⬇️
+
+export const googleSignup = async (req, res) => {
+  try {
+    const { googleToken } = req.body;
+
+    // Google token verify
+    const ticket = await client.verifyIdToken({
+      idToken: googleToken,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    const { email, name, sub: googleId, picture } = payload;
+
+    // Check if already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(400).json({ 
+        error: "Email already registered. Please login instead." 
+      });
+    }
+
+    // Create new user (WITHOUT password)
+    const user = await User.create({
+      name,
+      email: email.toLowerCase(),
+      googleId,
+      profilePhoto: picture,
+      authProvider: 'google',
+      // Temporary values - user will fill these in onboarding
+      primaryLanguageToLearn: 'English',
+      languagesKnow: [{ language: 'English', fluency: 'Beginner' }],
+      state: 'Delhi',
+      country: 'India'
+    });
+
+    // Generate JWT
+    const token = jwt.sign(
+      { userId: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: "30d" }
+    );
+
+    res.status(201).json({ 
+      message: "Google signup successful",
+      token,
+      userId: user._id.toString(),
+      needsOnboarding: true // Flag to redirect to onboarding
+    });
+
+  } catch (error) {
+    console.error("Google signup error:", error);
+    res.status(500).json({ error: "Google authentication failed" });
+  }
+};
+
+export const googleLogin = async (req, res) => {
+  try {
+    const { googleToken } = req.body;
+
+    // Google token verify
+    const ticket = await client.verifyIdToken({
+      idToken: googleToken,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    const { email } = payload;
+
+    // Find user
+    const user = await User.findOne({ 
+      email: email.toLowerCase(),
+      authProvider: 'google' 
+    });
+
+    if (!user) {
+      return res.status(404).json({ 
+        error: "Account not found. Please sign up first." 
+      });
+    }
+
+    // Generate JWT
+    const token = jwt.sign(
+      { userId: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: "30d" }
+    );
+
+    res.json({ 
+      token,
+      userId: user._id.toString(),
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        primaryRole: user.primaryRole
+      }
+    });
+
+  } catch (error) {
+    console.error("Google login error:", error);
+    res.status(500).json({ error: "Google authentication failed" });
   }
 };

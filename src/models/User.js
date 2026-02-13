@@ -4,6 +4,11 @@ const UserSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true, lowercase: true },
   password: { type: String, required: true },
+
+   // ⬇️ NAYE FIELDS
+  googleId: { type: String, sparse: true, unique: true },
+  authProvider: { type: String, enum: ["local", "google"], default: "local" },
+    //
   primaryLanguageToLearn: { type: String, required: true },
   secondaryLanguageToLearn: String,
   languagesKnow: [
