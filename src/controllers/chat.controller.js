@@ -321,12 +321,38 @@ export const deleteChat = async (req, res) => {
       return res.status(404).json({ error: "Chat not found" });
     }
 
+    // Add current user to deletedBy array
     if (!chat.deletedBy.includes(userId)) {
       chat.deletedBy.push(userId);
-      await chat.save();
     }
 
-    res.json({ message: "Chat deleted successfully" });
+    // ✅ Check if both participants deleted
+    const bothDeleted = chat.participants.every(participantId => 
+      chat.deletedBy.some(deletedId => deletedId.toString() === participantId.toString())
+    );
+
+    if (bothDeleted) {
+      // ✅ Permanently delete
+      await Chat.findByIdAndDelete(chatId);
+      await Notification.deleteMany({ chatId: chatId });
+      
+      console.log(`🗑️ Chat ${chatId} permanently deleted`);
+      
+      res.json({ 
+        message: "Chat permanently deleted",
+        permanentlyDeleted: true 
+      });
+    } else {
+      // ✅ Soft delete for one user
+      await chat.save();
+      
+      console.log(`📝 Chat ${chatId} deleted for user ${userId}`);
+      
+      res.json({ 
+        message: "Chat deleted successfully",
+        permanentlyDeleted: false 
+      });
+    }
   } catch (error) {
     console.error("Delete chat error:", error);
     res.status(500).json({ error: "Failed to delete chat" });
