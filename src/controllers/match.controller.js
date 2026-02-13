@@ -2,7 +2,7 @@ import Match from "../models/Match.js";
 import User from "../models/User.js";
 import Chat from "../models/Chat.js";
 import Notification from "../models/Notification.js";
-import { getIO } from "../socket.js";
+// ✅ NO Socket.IO import for match notifications - only for chat
 
 export const getPotentialMatches = async (req, res) => {
   try {
@@ -13,7 +13,7 @@ export const getPotentialMatches = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // ✅ FIXED: Exclude users with accepted matches in BOTH directions
+    // ✅ Exclude users with accepted matches in BOTH directions
     const acceptedMatches = await Match.find({
       $or: [
         { user1: userId, status: "accepted" },
@@ -25,11 +25,11 @@ export const getPotentialMatches = async (req, res) => {
       match.user1.toString() === userId ? match.user2.toString() : match.user1.toString()
     );
 
-    // ✅ FIXED: Exclude users you've interacted with in ANY direction
+    // ✅ Exclude users you've interacted with in ANY direction
     const existingInteractions = await Match.find({
       $or: [
-        { user1: userId }, // You swiped on them
-        { user2: userId }  // They swiped on you
+        { user1: userId },
+        { user2: userId }
       ]
     });
     
@@ -46,7 +46,7 @@ export const getPotentialMatches = async (req, res) => {
     const potentialMatches = await User.find({
       _id: { 
         $ne: userId, 
-        $nin: [...matchedUserIds, ...interactedUserIds] // Exclude all previous interactions
+        $nin: [...matchedUserIds, ...interactedUserIds]
       },
       state: user.state,
       primaryLanguageToLearn: { $in: languagesIKnow },
@@ -75,7 +75,7 @@ export const handleSwipe = async (req, res) => {
       return res.status(400).json({ error: "Invalid action" });
     }
 
-    // ✅ FIXED: Check if match exists in EITHER direction
+    // ✅ Check if match exists in EITHER direction
     const existingMatch = await Match.findOne({
       $or: [
         { user1: userId, user2: targetUserId },
@@ -84,11 +84,8 @@ export const handleSwipe = async (req, res) => {
     });
 
     if (existingMatch) {
-      // ✅ FIXED: Handle mutual match case
+      // ✅ Handle mutual match case
       if (existingMatch.status === 'pending' && action === 'like') {
-        // This is a MUTUAL MATCH!
-        const iAmUser1 = existingMatch.user1.toString() === userId;
-        
         console.log(`🎉 MUTUAL MATCH! User ${userId} and ${targetUserId} matched!`);
 
         // Update status to accepted
@@ -113,8 +110,8 @@ export const handleSwipe = async (req, res) => {
           type: "match_request"
         });
 
-        // ✅ Create notifications for BOTH users
-        const [notificationForCurrentUser, notificationForTargetUser] = await Promise.all([
+        // ✅ Create notifications for BOTH users (HTTP polling will fetch)
+        await Promise.all([
           Notification.create({
             recipient: userId,
             sender: targetUserId,
@@ -129,50 +126,7 @@ export const handleSwipe = async (req, res) => {
           })
         ]);
 
-        await Promise.all([
-          notificationForCurrentUser.populate('sender', 'name languagesKnow'),
-          notificationForTargetUser.populate('sender', 'name languagesKnow')
-        ]);
-
-        // ✅ FIXED: Emit Socket.IO events to specific users
-        try {
-          const io = getIO();
-          
-          // Notify current user
-          io.to(`user_${userId}`).emit("match_accepted", {
-            userId: userId,
-            notification: {
-              _id: notificationForCurrentUser._id,
-              type: notificationForCurrentUser.type,
-              sender: notificationForCurrentUser.sender,
-              matchId: existingMatch._id,
-              createdAt: notificationForCurrentUser.createdAt
-            }
-          });
-
-          // Notify target user
-          io.to(`user_${targetUserId}`).emit("match_accepted", {
-            userId: targetUserId,
-            notification: {
-              _id: notificationForTargetUser._id,
-              type: notificationForTargetUser.type,
-              sender: notificationForTargetUser.sender,
-              matchId: existingMatch._id,
-              createdAt: notificationForTargetUser.createdAt
-            }
-          });
-
-          io.to(`user_${userId}`).emit("new_notification", { 
-            userId: userId, 
-            notification: notificationForCurrentUser 
-          });
-          io.to(`user_${targetUserId}`).emit("new_notification", { 
-            userId: targetUserId, 
-            notification: notificationForTargetUser 
-          });
-        } catch (socketError) {
-          console.log("Socket.io not available for match notification");
-        }
+        console.log(`✅ Match accepted notifications created for both users`);
 
         return res.json({ 
           message: "It's a match!",
@@ -181,7 +135,6 @@ export const handleSwipe = async (req, res) => {
           match: existingMatch
         });
       } else {
-        // Already interacted with this user
         return res.status(400).json({ error: "You already interacted with this user" });
       }
     }
@@ -189,7 +142,6 @@ export const handleSwipe = async (req, res) => {
     // No existing match in either direction
 
     if (action === "skip") {
-      // Create a rejected match
       await Match.create({
         user1: userId,
         user2: targetUserId,
@@ -207,34 +159,17 @@ export const handleSwipe = async (req, res) => {
       status: "pending"
     });
 
-    // Create notification for target user
-    const notification = await Notification.create({
+    // ✅ Create notification (HTTP polling will fetch)
+    await Notification.create({
       recipient: targetUserId,
       sender: userId,
       type: "match_request",
       matchId: match._id
     });
 
-    await notification.populate('sender', 'name languagesKnow');
-
-    // ✅ FIXED: Notify specific user via Socket.IO
-    try {
-      const io = getIO();
-      io.to(`user_${targetUserId}`).emit("new_notification", {
-        userId: targetUserId,
-        notification: {
-          _id: notification._id,
-          type: notification.type,
-          sender: notification.sender,
-          matchId: match._id,
-          createdAt: notification.createdAt
-        }
-      });
-    } catch (socketError) {
-      console.log("Socket.io not available for notification");
-    }
-
     console.log(`💌 Match request sent from ${userId} to ${targetUserId}`);
+    console.log(`✅ Notification created - HTTP polling will fetch it`);
+    
     return res.json({ 
       message: "Match request sent", 
       matched: false,
@@ -257,7 +192,6 @@ export const getMyMatches = async (req, res) => {
     .populate('user2', '-password')
     .sort({ createdAt: -1 });
 
-    // Format matches to show the other user
     const formattedMatches = matches.map(match => {
       const otherUser = match.user1._id.toString() === userId 
         ? match.user2 
@@ -283,6 +217,11 @@ export const acceptMatch = async (req, res) => {
   try {
     const userId = req.user.userId;
     const { matchId } = req.params;
+
+    // ✅ Validate matchId format
+    if (!matchId || matchId === 'undefined' || matchId === 'null') {
+      return res.status(400).json({ error: "Invalid match ID" });
+    }
 
     const match = await Match.findOne({
       _id: matchId,
@@ -317,8 +256,8 @@ export const acceptMatch = async (req, res) => {
       type: "match_request"
     });
 
-    // Create notifications for BOTH users
-    const [notificationForAcceptor, notificationForSender] = await Promise.all([
+    // ✅ Create notifications for BOTH users (HTTP polling will fetch)
+    await Promise.all([
       Notification.create({
         recipient: userId,
         sender: match.user1,
@@ -333,52 +272,8 @@ export const acceptMatch = async (req, res) => {
       })
     ]);
 
-    await Promise.all([
-      notificationForAcceptor.populate('sender', 'name languagesKnow'),
-      notificationForSender.populate('sender', 'name languagesKnow')
-    ]);
-
-    // ✅ FIXED: Notify specific users via Socket.IO
-    try {
-      const io = getIO();
-      
-      // Notify both users
-      io.to(`user_${userId}`).emit("match_accepted", {
-        userId: userId,
-        notification: {
-          _id: notificationForAcceptor._id,
-          type: notificationForAcceptor.type,
-          sender: notificationForAcceptor.sender,
-          matchId: match._id,
-          createdAt: notificationForAcceptor.createdAt
-        }
-      });
-
-      io.to(`user_${match.user1.toString()}`).emit("match_accepted", {
-        userId: match.user1.toString(),
-        notification: {
-          _id: notificationForSender._id,
-          type: notificationForSender.type,
-          sender: notificationForSender.sender,
-          matchId: match._id,
-          createdAt: notificationForSender.createdAt
-        }
-      });
-
-      io.to(`user_${userId}`).emit("new_notification", {
-        userId: userId,
-        notification: notificationForAcceptor
-      });
-
-      io.to(`user_${match.user1.toString()}`).emit("new_notification", {
-        userId: match.user1.toString(),
-        notification: notificationForSender
-      });
-    } catch (socketError) {
-      console.log("Socket.io not available for match acceptance");
-    }
-
     console.log(`✅ User ${userId} accepted match request from ${match.user1}`);
+    console.log(`✅ Match accepted notifications created for both users`);
 
     res.json({ 
       message: "Match accepted", 
@@ -395,6 +290,11 @@ export const rejectMatch = async (req, res) => {
   try {
     const userId = req.user.userId;
     const { matchId } = req.params;
+
+    // ✅ Validate matchId format
+    if (!matchId || matchId === 'undefined' || matchId === 'null') {
+      return res.status(400).json({ error: "Invalid match ID" });
+    }
 
     const match = await Match.findOne({
       _id: matchId,
