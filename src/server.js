@@ -11,7 +11,7 @@ import authRoutes from "./routes/auth.routes.js";
 import jobRoutes from "./routes/job.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import { initializeJobSchedulers } from "./utils/jobScheduler.js";
-
+import adminRoutes from "./routes/admin.routes.js"
 
 dotenv.config();
 
