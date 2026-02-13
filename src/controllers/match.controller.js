@@ -167,24 +167,62 @@ export const handleSwipe = async (req, res) => {
       status: "pending"
     });
 
-    // ✅ Create notification (HTTP polling will fetch)
-    await Notification.create({
-      recipient: targetUserId,
-      sender: userId,
-      type: "match_request",
-      matchId: match._id
-    });
+    console.log(`✅ Match created with ID: ${match._id}`);
+    console.log(`📝 Match details:`, { user1: userId, user2: targetUserId, status: 'pending' });
 
-    console.log(`💌 Match request sent from ${userId} to ${targetUserId}`);
-    console.log(`✅ Notification created - HTTP polling will fetch it`);
+    // ✅ Create notification with DETAILED error handling
+    try {
+      console.log(`🔔 Attempting to create notification...`);
+      console.log(`📝 Notification data:`, {
+        recipient: targetUserId,
+        sender: userId,
+        type: "match_request",
+        matchId: match._id
+      });
+
+      const notification = await Notification.create({
+        recipient: targetUserId,
+        sender: userId,
+        type: "match_request",
+        matchId: match._id
+      });
+
+      console.log(`✅ Notification created successfully with ID: ${notification._id}`);
+      console.log(`💌 Match request sent from ${userId} to ${targetUserId}`);
+      
+      return res.json({ 
+        message: "Match request sent", 
+        matched: false,
+        match,
+        notificationCreated: true
+      });
+
+    } catch (notifError) {
+      console.error("❌ NOTIFICATION CREATE ERROR:", notifError);
+      console.error("Error name:", notifError.name);
+      console.error("Error message:", notifError.message);
+      
+      if (notifError.errors) {
+        console.error("Validation errors:", JSON.stringify(notifError.errors, null, 2));
+      }
+      
+      if (notifError.stack) {
+        console.error("Stack trace:", notifError.stack);
+      }
+
+      // Still return success for match creation
+      return res.json({ 
+        message: "Match request sent (notification failed)", 
+        matched: false,
+        match,
+        notificationCreated: false,
+        notificationError: notifError.message
+      });
+    }
     
-    return res.json({ 
-      message: "Match request sent", 
-      matched: false,
-      match 
-    });
   } catch (error) {
-    console.error("Handle swipe error:", error);
+    console.error("❌ Handle swipe error:", error);
+    console.error("Error stack:", error.stack);
     res.status(500).json({ error: "Failed to process swipe" });
   }
 };
