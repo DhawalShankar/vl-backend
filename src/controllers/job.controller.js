@@ -1,5 +1,6 @@
-// job.controller.js - WITH USER AUTHENTICATION
+// job.controller.js - COMPLETE FIXED VERSION
 import Job from "../models/Job.js";
+import User from "../models/User.js";  // ← ADD THIS
 
 /* -------------------- CONTROLLERS -------------------- */
 
@@ -25,11 +26,10 @@ export const getJobListings = async (req, res) => {
 
     const skip = (page - 1) * limit;
 
-    // ✅ POPULATE postedBy to get user details
     const jobs = await Job.getActiveJobs(filters)
       .skip(skip)
       .limit(Number(limit))
-      .populate('postedBy', 'name email')  // ← ADD THIS
+      .populate('postedBy', 'name email')
       .select("-__v");
 
     const totalJobs = await Job.countDocuments({
@@ -52,9 +52,8 @@ export const getJobListings = async (req, res) => {
 
 export const getJobById = async (req, res) => {
   try {
-    // ✅ POPULATE postedBy
     const job = await Job.findById(req.params.id)
-      .populate('postedBy', 'name email')  // ← ADD THIS
+      .populate('postedBy', 'name email')
       .select("-__v");
 
     if (!job)
@@ -70,14 +69,22 @@ export const getJobById = async (req, res) => {
   }
 };
 
-// ✅ UPDATED: NOW REQUIRES AUTHENTICATION
 export const createJob = async (req, res) => {
   try {
-    // ✅ CHECK IF USER IS AUTHENTICATED
-    if (!req.user) {
+    // ✅ CHECK AUTHENTICATION
+    if (!req.user || !req.user.userId) {
       return res.status(401).json({ 
         success: false, 
         error: "Authentication required to post a job" 
+      });
+    }
+
+    // ✅ FETCH USER DETAILS
+    const user = await User.findById(req.user.userId).select('name email');
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "User not found" 
       });
     }
 
@@ -112,7 +119,7 @@ export const createJob = async (req, res) => {
       ? requirements
       : requirements?.split('\n').filter(r => r.trim()).map(r => r.trim()) || [];
 
-    // ✅ CREATE JOB WITH USER INFO
+    // ✅ CREATE JOB WITH CORRECT USER ID
     const job = await Job.create({
       title: title.trim(),
       language: language.trim(),
@@ -125,11 +132,11 @@ export const createJob = async (req, res) => {
       responsibilities: processedResponsibilities,
       requirements: processedRequirements,
       contactEmail: contactEmail.trim().toLowerCase(),
-      postedBy: req.user._id,           // ← USER ID
-      postedByName: req.user.name        // ← USER NAME
+      postedBy: req.user.userId,        // ✅ FIX
+      postedByName: user.name            // ✅ FIX
     });
 
-    // ✅ POPULATE before sending response
+    // Populate before sending response
     await job.populate('postedBy', 'name email');
 
     res.status(201).json({
@@ -194,14 +201,18 @@ export const getAvailableLanguages = async (req, res) => {
   }
 };
 
-// ✅ ONLY JOB OWNER CAN DELETE
 export const deleteJob = async (req, res) => {
   try {
     const job = await Job.findById(req.params.id);
-    if (!job) return res.status(404).json({ success: false, message: "Job not found" });
+    if (!job) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Job not found" 
+      });
+    }
 
-    // ✅ CHECK OWNERSHIP
-    if (job.postedBy.toString() !== req.user._id.toString()) {
+    // ✅ CHECK OWNERSHIP - FIX
+    if (job.postedBy.toString() !== req.user.userId.toString()) {
       return res.status(403).json({ 
         success: false, 
         message: "You can only delete your own jobs" 
@@ -209,27 +220,44 @@ export const deleteJob = async (req, res) => {
     }
 
     await job.deleteOne();
-    res.json({ success: true, message: "Job deleted successfully" });
+    res.json({ 
+      success: true, 
+      message: "Job deleted successfully" 
+    });
   } catch (err) {
     console.error("Delete job error:", err);
-    res.status(500).json({ success: false });
+    res.status(500).json({ 
+      success: false,
+      message: "Failed to delete job" 
+    });
   }
 };
 
-// ✅ NEW: GET MY JOBS
 export const getMyJobs = async (req, res) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({ success: false, message: "Authentication required" });
+    // ✅ CHECK AUTHENTICATION
+    if (!req.user || !req.user.userId) {
+      return res.status(401).json({ 
+        success: false, 
+        message: "Authentication required" 
+      });
     }
 
-    const jobs = await Job.find({ postedBy: req.user._id })
+    // ✅ FIX: Use req.user.userId
+    const jobs = await Job.find({ postedBy: req.user.userId })
       .sort({ postedDate: -1 })
       .select("-__v");
 
-    res.json({ success: true, jobs });
+    res.json({ 
+      success: true, 
+      jobs,
+      count: jobs.length 
+    });
   } catch (err) {
     console.error("Get my jobs error:", err);
-    res.status(500).json({ success: false });
+    res.status(500).json({ 
+      success: false,
+      message: "Failed to fetch your jobs" 
+    });
   }
 };
