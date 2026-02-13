@@ -2,6 +2,8 @@ import User from "../models/User.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { OAuth2Client } from 'google-auth-library'; // ← NAYA IMPORT
+
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 export const signup = async (req, res) => {
   try {
     const { email, password, name, primaryLanguageToLearn, languagesKnow, state } = req.body;
@@ -33,6 +35,7 @@ export const signup = async (req, res) => {
       ...req.body,
       email: email.toLowerCase(),
       password: hashed,
+      authProvider: 'local',
     });
 
     // Generate token
@@ -66,7 +69,11 @@ export const login = async (req, res) => {
     }
 
     // Find user
-    const user = await User.findOne({ email: email.toLowerCase() });
+    // Line 66 ko replace karo
+    const user = await User.findOne({ 
+      email: email.toLowerCase(),
+      authProvider: 'local' // ← YEH ADD KARO
+    });
     if (!user) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
@@ -154,18 +161,42 @@ export const updateProfile = async (req, res) => {
 
 export const googleSignup = async (req, res) => {
   try {
-    const { googleToken } = req.body;
+    const { 
+      googleAccessToken,  // ← Token name change
+      name,
+      email,
+      password, // ← Optional password
+      primaryLanguageToLearn,
+      secondaryLanguageToLearn,
+      languagesKnow,
+      primaryRole,
+      state,
+      country,
+      emailUpdates
+    } = req.body;
 
-    // Google token verify
-    const ticket = await client.verifyIdToken({
-      idToken: googleToken,
-      audience: process.env.GOOGLE_CLIENT_ID,
+    // Validate
+    if (!googleAccessToken || !name || !email || !primaryLanguageToLearn || !languagesKnow || !state) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // Verify Google token via userinfo endpoint
+    const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${googleAccessToken}` },
     });
+    
+    if (!userInfoResponse.ok) {
+      return res.status(401).json({ error: "Invalid Google token" });
+    }
 
-    const payload = ticket.getPayload();
-    const { email, name, sub: googleId, picture } = payload;
+    const googleUserInfo = await userInfoResponse.json();
 
-    // Check if already exists
+    // Verify email matches
+    if (googleUserInfo.email.toLowerCase() !== email.toLowerCase()) {
+      return res.status(400).json({ error: "Email mismatch" });
+    }
+
+    // Check if exists
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
       return res.status(400).json({ 
@@ -173,21 +204,32 @@ export const googleSignup = async (req, res) => {
       });
     }
 
-    // Create new user (WITHOUT password)
-    const user = await User.create({
+    // Prepare user data
+    const userData = {
       name,
       email: email.toLowerCase(),
-      googleId,
-      profilePhoto: picture,
+      googleId: googleUserInfo.sub,
       authProvider: 'google',
-      // Temporary values - user will fill these in onboarding
-      primaryLanguageToLearn: 'English',
-      languagesKnow: [{ language: 'English', fluency: 'Beginner' }],
-      state: 'Delhi',
-      country: 'India'
-    });
+      profilePhoto: googleUserInfo.picture,
+      primaryLanguageToLearn,
+      secondaryLanguageToLearn,
+      languagesKnow,
+      primaryRole: primaryRole || 'learner',
+      state,
+      country: country || 'India',
+      emailUpdates: emailUpdates !== undefined ? emailUpdates : true
+    };
 
-    // Generate JWT
+    // Optional password (for email login backup)
+    if (password && password.length >= 8) {
+      const hashed = await bcrypt.hash(password, 10);
+      userData.password = hashed;
+    }
+
+    // Create user
+    const user = await User.create(userData);
+
+    // Generate token
     const token = jwt.sign(
       { userId: user._id },
       process.env.JWT_SECRET,
@@ -198,7 +240,11 @@ export const googleSignup = async (req, res) => {
       message: "Google signup successful",
       token,
       userId: user._id.toString(),
-      needsOnboarding: true // Flag to redirect to onboarding
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email
+      }
     });
 
   } catch (error) {
@@ -209,20 +255,22 @@ export const googleSignup = async (req, res) => {
 
 export const googleLogin = async (req, res) => {
   try {
-    const { googleToken } = req.body;
+    const { googleAccessToken, email } = req.body; // ← Token name change
 
-    // Google token verify
-    const ticket = await client.verifyIdToken({
-      idToken: googleToken,
-      audience: process.env.GOOGLE_CLIENT_ID,
+    // Verify Google token
+    const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${googleAccessToken}` },
     });
+    
+    if (!userInfoResponse.ok) {
+      return res.status(401).json({ error: "Invalid Google token" });
+    }
 
-    const payload = ticket.getPayload();
-    const { email } = payload;
+    const googleUserInfo = await userInfoResponse.json();
 
     // Find user
     const user = await User.findOne({ 
-      email: email.toLowerCase(),
+      email: googleUserInfo.email.toLowerCase(),
       authProvider: 'google' 
     });
 
@@ -232,7 +280,7 @@ export const googleLogin = async (req, res) => {
       });
     }
 
-    // Generate JWT
+    // Generate token
     const token = jwt.sign(
       { userId: user._id },
       process.env.JWT_SECRET,
