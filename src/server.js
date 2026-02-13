@@ -56,6 +56,7 @@ app.use("/matches", matchRoutes);
 app.use("/chats", chatRoutes);
 app.use("/notifications", notificationRoutes);
 app.use("/jobs", jobRoutes);
+app.use("/admin", adminRoutes);  // ← ADD THIS
 // Health check endpoint
 app.get("/", (req, res) => {
   res.json({ message: "VartaLang API is running" });
