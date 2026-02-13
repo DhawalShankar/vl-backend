@@ -1,22 +1,20 @@
-// notification.controller.js - Production Grade
+// controllers/notification.controller.js - FIXED VERSION
 import Notification from "../models/Notification.js";
+import Match from "../models/Match.js";
 
 /**
  * Get all notifications for the current user
- * Supports pagination and filtering
  */
 export const getMyNotifications = async (req, res) => {
   try {
     const userId = req.user.userId;
     const { limit = 50, skip = 0, type } = req.query;
 
-    // Build query
     const query = { recipient: userId };
     if (type) {
       query.type = type;
     }
 
-    // Fetch with populate
     const notifications = await Notification.find(query)
       .populate('sender', 'name languagesKnow primaryLanguageToLearn')
       .populate('matchId')
@@ -48,7 +46,7 @@ export const getUnreadCount = async (req, res) => {
       recipient: userId
     });
 
-    console.log(`🔢 User ${userId} has ${count} unread notifications`);
+    console.log(`🔢 User ${userId} has ${count} notifications`);
 
     res.json({ count });
   } catch (error) {
@@ -65,14 +63,13 @@ export const deleteNotification = async (req, res) => {
     const userId = req.user.userId;
     const { notificationId } = req.params;
 
-    // Validate ID
     if (!notificationId || notificationId === 'undefined' || notificationId === 'null') {
       return res.status(400).json({ error: "Invalid notification ID" });
     }
 
     const result = await Notification.deleteOne({
       _id: notificationId,
-      recipient: userId // Security: only delete own notifications
+      recipient: userId
     });
 
     if (result.deletedCount === 0) {
@@ -92,106 +89,56 @@ export const deleteNotification = async (req, res) => {
 };
 
 /**
- * Delete all message notifications
- * Used when user visits chats page
+ * Delete all notifications AND auto-reject pending match requests
+ * Called when user clicks "Clear all"
  */
 export const deleteAllMessageNotifications = async (req, res) => {
   try {
     const userId = req.user.userId;
     
-    const result = await Notification.deleteMany({
+    console.log(`🧹 Clearing all notifications for user ${userId}...`);
+    
+    // ✅ Get all match_request notifications
+    const matchNotifs = await Notification.find({
       recipient: userId,
-      type: "new_message"
+      type: "match_request"
     });
-    
-    console.log(`🧹 Deleted ${result.deletedCount} message notifications for user ${userId}`);
-    
-    res.json({ 
-      message: "All message notifications deleted",
-      count: result.deletedCount
-    });
-  } catch (error) {
-    console.error("Delete all message notifications error:", error);
-    res.status(500).json({ error: "Failed to delete message notifications" });
-  }
-};
 
-/**
- * Delete all notifications (optional - for testing)
- */
-export const deleteAllNotifications = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    
+    console.log(`📋 Found ${matchNotifs.length} pending match requests`);
+
+    // ✅ Auto-reject all pending matches
+    let rejectedCount = 0;
+    for (const notif of matchNotifs) {
+      if (notif.matchId) {
+        try {
+          const match = await Match.findById(notif.matchId);
+          if (match && match.status === 'pending') {
+            match.status = 'rejected';
+            await match.save();
+            rejectedCount++;
+            console.log(`🚫 Auto-rejected match ${notif.matchId}`);
+          }
+        } catch (err) {
+          console.error(`❌ Failed to reject match ${notif.matchId}:`, err);
+        }
+      }
+    }
+
+    // ✅ Delete ALL notifications for this user
     const result = await Notification.deleteMany({
       recipient: userId
     });
     
-    console.log(`🧹 Deleted ${result.deletedCount} total notifications for user ${userId}`);
+    console.log(`✅ Deleted ${result.deletedCount} notifications`);
+    console.log(`✅ Auto-rejected ${rejectedCount} pending matches`);
     
     res.json({ 
-      message: "All notifications deleted",
-      count: result.deletedCount
+      message: "All notifications cleared and pending matches rejected",
+      count: result.deletedCount,
+      rejectedMatches: rejectedCount
     });
   } catch (error) {
-    console.error("Delete all notifications error:", error);
-    res.status(500).json({ error: "Failed to delete all notifications" });
-  }
-};
-
-/**
- * Mark notification as read (optional - for future use)
- */
-export const markAsRead = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const { notificationId } = req.params;
-
-    const notification = await Notification.findOneAndUpdate(
-      {
-        _id: notificationId,
-        recipient: userId
-      },
-      { read: true },
-      { new: true }
-    );
-
-    if (!notification) {
-      return res.status(404).json({ error: "Notification not found" });
-    }
-
-    console.log(`✅ Marked notification ${notificationId} as read for user ${userId}`);
-
-    res.json({ 
-      message: "Notification marked as read",
-      notification
-    });
-  } catch (error) {
-    console.error("Mark as read error:", error);
-    res.status(500).json({ error: "Failed to mark notification as read" });
-  }
-};
-
-/**
- * Mark all notifications as read (optional - for future use)
- */
-export const markAllAsRead = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    
-    const result = await Notification.updateMany(
-      { recipient: userId, read: false },
-      { read: true }
-    );
-    
-    console.log(`✅ Marked ${result.modifiedCount} notifications as read for user ${userId}`);
-    
-    res.json({ 
-      message: "All notifications marked as read",
-      count: result.modifiedCount
-    });
-  } catch (error) {
-    console.error("Mark all as read error:", error);
-    res.status(500).json({ error: "Failed to mark all as read" });
+    console.error("Clear all notifications error:", error);
+    res.status(500).json({ error: "Failed to clear notifications" });
   }
 };
