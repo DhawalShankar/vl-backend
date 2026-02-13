@@ -2,7 +2,7 @@
 import Chat from "../models/Chat.js";
 import User from "../models/User.js";
 import Notification from "../models/Notification.js"; // ✅ Import Notification model
-import nodemailer from "nodemailer";
+import { createTransport } from "nodemailer";
 import { getIO, emitToChat } from "../socket.js";
 
 export const getMyChats = async (req, res) => {
@@ -348,8 +348,8 @@ export const reportUser = async (req, res) => {
 
     const reportedUser = chat.participants.find(p => p._id.toString() !== userId);
 
-    // Send email (configure your email service)
-    const transporter = nodemailer.createTransporter({
+    // ✅ YAHAAN CHANGE - createTransport use karo
+    const transporter = createTransport({
       service: 'gmail',
       auth: {
         user: process.env.EMAIL_USER,
@@ -359,7 +359,7 @@ export const reportUser = async (req, res) => {
 
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
-      to: 'vartalang@gmail.com',
+      to: 'vartalang@gmail.com',  // ✅ Real email use karo
       subject: `User Report - VartaLang`,
       html: `
         <h2>User Report</h2>
