@@ -47,7 +47,6 @@ export const getPotentialMatches = async (req, res) => {
         $ne: userId, 
         $nin: [...matchedUserIds, ...interactedUserIds]
       },
-      state: user.state,
       primaryLanguageToLearn: { $in: languagesIKnow },
       "languagesKnow.language": languageIWantToLearn
     }).select("-password").limit(20);
@@ -174,7 +173,7 @@ export const handleSwipe = async (req, res) => {
     });
 
     console.log(`✅ Notification created: ${notification._id}`);
-    console.log(`💌 Match request sent from ${userId} to ${targetUserId}`);
+    console.log(`🙏Match request sent from ${userId} to ${targetUserId}`);
     
     return res.json({ 
       message: "Match request sent", 
