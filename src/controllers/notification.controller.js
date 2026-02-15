@@ -16,7 +16,7 @@ export const getMyNotifications = async (req, res) => {
     }
 
     const notifications = await Notification.find(query)
-      .populate('sender', 'name languagesKnow primaryLanguageToLearn')
+      .populate('sender', 'name profilePhoto languagesKnow primaryLanguageToLearn')
       .populate('matchId')
       .populate('chatId')
       .sort({ createdAt: -1 })
