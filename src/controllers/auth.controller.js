@@ -303,3 +303,30 @@ export const googleLogin = async (req, res) => {
     res.status(500).json({ error: "Google authentication failed" });
   }
 };
+
+
+
+// Add this function with your other exports
+
+export const getUserById = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Validate ObjectId
+    if (!userId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ error: "Invalid user ID" });
+    }
+
+    // Fetch user (exclude password)
+    const user = await User.findById(userId).select("-password");
+    
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({ user });
+  } catch (error) {
+    console.error("Get user by ID error:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
