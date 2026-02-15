@@ -1,4 +1,4 @@
-// models/Job.js - COMPLETE WITH SALARY FIELDS
+// models/Job.js - FIXED VERSION
 import mongoose from "mongoose";
 
 const jobSchema = new mongoose.Schema(
@@ -25,7 +25,7 @@ const jobSchema = new mongoose.Schema(
       enum: ["translation", "teaching", "interpretation", "content", "assistance", "research", "other"],
       default: "other"
     },
-    // ✅ NEW SALARY FIELDS
+    // ✅ SALARY FIELDS
     salaryMin: {
       type: Number,
       min: 0
@@ -149,8 +149,8 @@ jobSchema.virtual("isExpired").get(function () {
   return new Date() > this.expiryDate;
 });
 
-/* Middleware */
-jobSchema.pre("save", async function (next) {
+/* Middleware - FIXED: Remove next() callback when using async/await */
+jobSchema.pre("save", async function () {
   // Set expiry date for new jobs
   if (this.isNew && !this.expiryDate) {
     const d = new Date();
@@ -163,12 +163,10 @@ jobSchema.pre("save", async function (next) {
     this.status = "expired";
   }
 
-  // ✅ Validate salary range
+  // ✅ Validate salary range - throw error instead of calling next()
   if (this.salaryMin && this.salaryMax && this.salaryMin > this.salaryMax) {
-    return next(new Error('Minimum salary cannot be greater than maximum salary'));
+    throw new Error('Minimum salary cannot be greater than maximum salary');
   }
-  
-  next();
 });
 
 /* Static Methods */
