@@ -267,7 +267,7 @@ export const getPlatformStats = async (req, res) => {
         jobs: {
           total: totalJobs,
           active: activeJobs,
-          expired: expiredJobs
+          expired: totalJobs - activeJobs
         },
         engagement: {
           matches: totalMatches,
