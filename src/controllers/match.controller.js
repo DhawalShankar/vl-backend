@@ -1,3 +1,4 @@
+// match.controller.js
 import Match from "../models/Match.js";
 import User from "../models/User.js";
 import Chat from "../models/Chat.js";
@@ -19,36 +20,50 @@ export const getPotentialMatches = async (req, res) => {
         { user2: userId, status: "accepted" }
       ]
     });
-    
-    const matchedUserIds = acceptedMatches.map(match => 
+
+    const matchedUserIds = acceptedMatches.map(match =>
       match.user1.toString() === userId ? match.user2.toString() : match.user1.toString()
     );
 
-    // Exclude users you've interacted with in ANY direction
     const existingInteractions = await Match.find({
       $or: [
         { user1: userId },
         { user2: userId }
       ]
     });
-    
+
     const interactedUserIds = existingInteractions.map(match => {
-      return match.user1.toString() === userId 
-        ? match.user2.toString() 
+      return match.user1.toString() === userId
+        ? match.user2.toString()
         : match.user1.toString();
     });
 
+    // ✅ FIX: languages I KNOW (teaching side) — unchanged
     const languagesIKnow = user.languagesKnow.map(l => l.language);
-    const languageIWantToLearn = user.primaryLanguageToLearn;
 
-    // Find potential matches
+    // ✅ FIX: languages I want to LEARN — combine primary + secondary
+    const languagesIWantToLearn = [
+      user.primaryLanguageToLearn,
+      user.secondaryLanguageToLearn
+    ].filter(Boolean); // remove undefined/null if secondary not set
+
+    // Find potential matches — reciprocal check on FULL arrays, not just primary
     const potentialMatches = await User.find({
-      _id: { 
-        $ne: userId, 
+      _id: {
+        $ne: userId,
         $nin: [...matchedUserIds, ...interactedUserIds]
       },
-      primaryLanguageToLearn: { $in: languagesIKnow },
-      "languagesKnow.language": languageIWantToLearn
+      $and: [
+        // They teach something I want to learn
+        { "languagesKnow.language": { $in: languagesIWantToLearn } },
+        // I teach something they want to learn (their primary OR secondary)
+        {
+          $or: [
+            { primaryLanguageToLearn: { $in: languagesIKnow } },
+            { secondaryLanguageToLearn: { $in: languagesIKnow } }
+          ]
+        }
+      ]
     }).select("-password").limit(20);
 
     console.log(`📋 Found ${potentialMatches.length} potential matches for user ${userId}`);
