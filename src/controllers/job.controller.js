@@ -89,7 +89,7 @@ export const createJob = async (req, res) => {
     if (existingJob) {
       return res.status(403).json({ 
         success: false, 
-        error: "You already have an active job posting. Each user can only post one job at a time. For extensions or additional postings, please contact vartalang@gmail.com" 
+        error: "You already have an active job posting. Each user can only post one job at a time. For extensions or additional postings, please contact cosmoindiaprakashan@gmail.com" 
       });
     }
 
@@ -178,7 +178,7 @@ export const createJob = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: "Job posted successfully! It will be live for 7 days. Note: Each user can only have one active job posting at a time. For extensions, contact vartalang@gmail.com",
+      message: "Job posted successfully! It will be live for 7 days. Note: Each user can only have one active job posting at a time. For extensions, contact cosmoindiaprakashan@gmail.com",
       jobId: job._id,
       expiryDate: job.expiryDate,
       job
@@ -292,8 +292,8 @@ export const getMyJobs = async (req, res) => {
       message: jobs.length === 0 
         ? "You haven't posted any jobs yet. You can post one job for free (7 days)." 
         : jobs.length === 1 && jobs[0].status === "active" 
-          ? "You have reached your limit of 1 active job. For extensions or additional postings, contact vartalang@gmail.com"
-          : "For job extensions or additional postings, contact vartalang@gmail.com"
+          ? "You have reached your limit of 1 active job. For extensions or additional postings, contact cosmoindiaprakashan@gmail.com"
+          : "For job extensions or additional postings, contact cosmoindiaprakashan@gmail.com"
     });
   } catch (err) {
     console.error("Get my jobs error:", err);

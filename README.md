@@ -99,7 +99,7 @@ The API will be available at `http://localhost:4000`, and Socket.IO will be atta
 - **Local auth:** email + password, hashed with `bcrypt`. JWT issued on signup/login, valid for 7 days.
 - **Google auth:** frontend sends a Google access token; backend verifies it against Google's `userinfo` endpoint and matches the email before issuing a JWT (valid 30 days).
 - **Route protection:** `auth.middleware.js` (`protect`) reads the `Authorization: Bearer <token>` header, verifies the JWT, and attaches `req.user.userId` to the request.
-- **Admin protection:** `admin.middleware.js` (`adminOnly`) additionally checks that the authenticated user's email matches the hardcoded admin account (`vartalang@gmail.com`).
+- **Admin protection:** `admin.middleware.js` (`adminOnly`) additionally checks that the authenticated user's email matches the hardcoded admin account (`cosmoindiaprakashan@gmail.com`).
 
 ---
 
@@ -211,7 +211,7 @@ Base routes mounted in `server.js`:
 - "Clear all" also auto-rejects any still-pending match requests to avoid orphaned notifications.
 
 **Admin (`/admin`)**
-- Single hardcoded admin account (`vartalang@gmail.com`).
+- Single hardcoded admin account (`cosmoindiaprakashan@gmail.com`).
 - View/delete abuse reports, view full report context (chat + participants), moderate any job listing (extend/delete), platform-wide stats (users, jobs, matches, chats), and list all users.
 
 ---

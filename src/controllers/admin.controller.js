@@ -300,7 +300,7 @@ export const checkAdminStatus = async (req, res) => {
       });
     }
 
-    const isAdmin = user.email.toLowerCase() === 'vartalang@gmail.com';
+    const isAdmin = user.email.toLowerCase() === 'cosmoindiaprakashan@gmail.com';
 
     res.json({ 
       success: true, 

@@ -21,8 +21,8 @@ export const adminOnly = async (req, res, next) => {
       });
     }
 
-    // Only vartalang@gmail.com has admin access
-    if (user.email.toLowerCase() !== 'vartalang@gmail.com') {
+    // Only cosmoindiaprakashan@gmail.com has admin access
+    if (user.email.toLowerCase() !== 'cosmoindiaprakashan@gmail.com') {
       return res.status(403).json({ 
         success: false, 
         error: "Access denied. Admin only." 
