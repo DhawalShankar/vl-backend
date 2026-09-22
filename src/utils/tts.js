@@ -1,18 +1,18 @@
 // src/utils/tts.js
 //
-// Sarvam AI Text-to-Speech (bulbul:v1 or similar — check exact model name
-// in Sarvam's TTS docs). Mirrors translate.js: fails open, returns null on
-// any error so the frontend can just disable the button / show a toast.
+// Sarvam AI Text-to-Speech (bulbul:v3). Mirrors translate.js: fails open,
+// returns null on any error so the frontend can just disable the button.
 
 const SARVAM_API_KEY = process.env.SARVAM_API_KEY;
 const SARVAM_TTS_URL = "https://api.sarvam.ai/text-to-speech";
-const SARVAM_TTS_MAX_CHARS = 500; // check actual limit in Sarvam docs
+const SARVAM_TTS_MAX_CHARS = 2500; // bulbul:v3 limit
 const SARVAM_TTS_TIMEOUT_MS = 10000;
 
 /**
  * @param {string} text
- * @param {string|null} langCode - BCP-47 code (e.g. "hi-IN"), or null to
- *        let the provider auto-detect if it supports that
+ * @param {string|null} langCode - BCP-47 code (e.g. "hi-IN"). Sarvam's TTS
+ *        endpoint requires this (no auto-detect), so we fall back to a
+ *        default when the caller doesn't have one.
  * @returns {Promise<{ audioData: string, audioFormat: string } | null>}
  */
 export const synthesizeSpeech = async (text, langCode) => {
@@ -35,9 +35,9 @@ export const synthesizeSpeech = async (text, langCode) => {
         "api-subscription-key": SARVAM_API_KEY
       },
       body: JSON.stringify({
-        inputs: [trimmed],
-        target_language_code: langCode || "hi-IN", // fallback default
-        model: "bulbul:v1" // ⚠️ verify exact model name in Sarvam docs
+        text: trimmed,
+        language_code: langCode || "hi-IN", // fallback default
+        model: "bulbul:v3"
       }),
       signal: controller.signal
     });
@@ -49,7 +49,7 @@ export const synthesizeSpeech = async (text, langCode) => {
     }
 
     const data = await response.json();
-    const audio = data?.audios?.[0]; // ⚠️ verify actual response shape in docs
+    const audio = data?.audios?.[0];
 
     if (!audio) return null;
 
