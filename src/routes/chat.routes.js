@@ -23,6 +23,6 @@ router.post("/:chatId/unblock", protect, unblockUser);
 router.delete("/:chatId", protect, deleteChat);
 router.post("/:chatId/report", protect, reportUser);
 router.put("/translation-settings", protect, updateTranslationSettings);
-router.post("/:chatId/message/:messageId/pronounce", protect, pronounceMessage);
+router.get("/:chatId/message/:messageId/pronounce", protect, pronounceMessage);
 
 export default router;
