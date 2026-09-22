@@ -7,7 +7,8 @@ import {
   blockUser, 
   unblockUser, 
   deleteChat,
-  reportUser 
+  reportUser,
+  updateTranslationSettings   // ✅ NEW
 } from "../controllers/chat.controller.js";
 import { protect } from "../middlewares/auth.middleware.js";
 
@@ -20,5 +21,6 @@ router.post("/:chatId/block", protect, blockUser);
 router.post("/:chatId/unblock", protect, unblockUser);
 router.delete("/:chatId", protect, deleteChat);
 router.post("/:chatId/report", protect, reportUser);
+router.put("/translation-settings", protect, updateTranslationSettings);   // ✅ NEW
 
 export default router;

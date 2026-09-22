@@ -36,7 +36,14 @@ const UserSchema = new mongoose.Schema({
   profilePhoto: String,
   totalConnections: { type: Number, default: 0 },
   coursesCompleted: { type: Number, default: 0 },
-  hoursLearned: { type: Number, default: 0 }
+  hoursLearned: { type: Number, default: 0 },
+
+  // ✅ NEW: opt-in chat translation plugin — pure on/off.
+  // The target language is derived automatically from languagesKnow
+  // (see chat.controller.js), so no language field is stored here.
+  translationPreference: {
+    enabled: { type: Boolean, default: false }
+  }
 });
 
 export default mongoose.model("User", UserSchema);
