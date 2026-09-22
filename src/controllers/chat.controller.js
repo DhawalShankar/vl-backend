@@ -6,6 +6,8 @@ import { getIO, emitToChat } from "../socket.js";
 import Report from "../models/Report.js"; // Create Report model
 import { translateMessage } from "../utils/translate.js"; // ✅ NEW: translation plugin
 import { getLanguageCode } from "../utils/languageCodes.js"; // ✅ NEW: language name -> BCP-47 code
+import { synthesizeSpeech } from "../utils/tts.js"; // new file, mirrors translate.js
+
 
 // ✅ NEW: when a recipient knows more than one language, translate into
 // whichever one they're most fluent in. Matches the actual enum on User
@@ -513,5 +515,61 @@ export const reportUser = async (req, res) => {
   } catch (error) {
     console.error("Report error:", error);
     res.status(500).json({ error: "Failed to submit report" });
+  }
+};
+
+// ✅ NEW: on-demand pronunciation for any message. No preference check —
+// anyone can tap it. Caches the audio URL/base64 on the message so repeat
+// taps don't re-hit the API.
+export const pronounceMessage = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { chatId, messageId } = req.params;
+
+    const chat = await Chat.findOne({
+      _id: chatId,
+      participants: userId
+    });
+
+    if (!chat) {
+      return res.status(404).json({ error: "Chat not found" });
+    }
+
+    const message = chat.messages.id(messageId);
+    if (!message) {
+      return res.status(404).json({ error: "Message not found" });
+    }
+
+    // Already cached — return it, no API call
+    if (message.audioData) {
+      return res.json({ audioData: message.audioData, audioFormat: message.audioFormat });
+    }
+
+    // Pronounce whichever text is on screen for the requester: if this
+    // message has a translation and they're likely reading the translated
+    // version, prefer that — otherwise use the original text.
+    const { lang } = req.query; // "original" | "translated", from frontend
+    const textToSpeak = lang === "translated" && message.translatedText
+      ? message.translatedText
+      : message.text;
+    const langCode = lang === "translated" && message.translatedLang
+      ? message.translatedLang
+      : null; // null = auto-detect on the TTS side if supported, else default
+
+    const result = await synthesizeSpeech(textToSpeak, langCode);
+
+    if (!result?.audioData) {
+      return res.status(502).json({ error: "Could not generate audio" });
+    }
+
+    // Cache on the message so repeat taps are free
+    message.audioData = result.audioData;
+    message.audioFormat = result.audioFormat || "wav";
+    await chat.save();
+
+    res.json({ audioData: message.audioData, audioFormat: message.audioFormat });
+  } catch (error) {
+    console.error("Pronounce message error:", error);
+    res.status(500).json({ error: "Failed to generate pronunciation" });
   }
 };
