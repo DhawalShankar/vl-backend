@@ -1,4 +1,4 @@
-// controllers/notification.controller.js - FIXED VERSION
+// controllers/notification.controller.js
 import Notification from "../models/Notification.js";
 import Match from "../models/Match.js";
 
@@ -90,7 +90,7 @@ export const deleteNotification = async (req, res) => {
 
 /**
  * Delete all notifications AND auto-reject pending match requests
- * Called when user clicks "Clear all"
+ * Called when user clicks "Clear all" (kept as-is — unrelated to chat page)
  */
 export const deleteAllMessageNotifications = async (req, res) => {
   try {
@@ -98,7 +98,6 @@ export const deleteAllMessageNotifications = async (req, res) => {
     
     console.log(`🧹 Clearing all notifications for user ${userId}...`);
     
-    // ✅ Get all match_request notifications
     const matchNotifs = await Notification.find({
       recipient: userId,
       type: "match_request"
@@ -106,7 +105,6 @@ export const deleteAllMessageNotifications = async (req, res) => {
 
     console.log(`📋 Found ${matchNotifs.length} pending match requests`);
 
-    // ✅ Auto-reject all pending matches
     let rejectedCount = 0;
     for (const notif of matchNotifs) {
       if (notif.matchId) {
@@ -124,7 +122,6 @@ export const deleteAllMessageNotifications = async (req, res) => {
       }
     }
 
-    // ✅ Delete ALL notifications for this user
     const result = await Notification.deleteMany({
       recipient: userId
     });
@@ -140,5 +137,55 @@ export const deleteAllMessageNotifications = async (req, res) => {
   } catch (error) {
     console.error("Clear all notifications error:", error);
     res.status(500).json({ error: "Failed to clear notifications" });
+  }
+};
+
+// ✅ NEW: called on the chats page load — clears ONLY "new_message"
+// notifications, leaves match_request/match_accepted/match_rejected
+// completely untouched (unlike deleteAllMessageNotifications above).
+export const clearAllChatNotifications = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const result = await Notification.deleteMany({
+      recipient: userId,
+      type: "new_message"
+    });
+
+    console.log(`🧹 Cleared ${result.deletedCount} chat notifications for user ${userId}`);
+
+    res.json({
+      message: "Chat notifications cleared",
+      count: result.deletedCount
+    });
+  } catch (error) {
+    console.error("Clear all chat notifications error:", error);
+    res.status(500).json({ error: "Failed to clear chat notifications" });
+  }
+};
+
+// ✅ NEW: called when a specific chat is opened — deletes only that
+// chat's "new_message" notifications for this user. No read-marking,
+// just straight delete, per current simplified flow.
+export const deleteChatNotifications = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { chatId } = req.params;
+
+    const result = await Notification.deleteMany({
+      recipient: userId,
+      chatId,
+      type: "new_message"
+    });
+
+    console.log(`🗑️ Deleted ${result.deletedCount} notifications for chat ${chatId}`);
+
+    res.json({
+      message: "Notifications cleared",
+      count: result.deletedCount
+    });
+  } catch (error) {
+    console.error("Delete chat notifications error:", error);
+    res.status(500).json({ error: "Failed to delete notifications" });
   }
 };
