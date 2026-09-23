@@ -573,3 +573,57 @@ export const pronounceMessage = async (req, res) => {
     res.status(500).json({ error: "Failed to generate pronunciation" });
   }
 };
+
+export const markChatAsRead = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { chatId } = req.params;
+
+    const chat = await Chat.findOne({
+      _id: chatId,
+      participants: userId,
+      deletedBy: { $ne: userId }
+    });
+
+    if (!chat) {
+      return res.status(404).json({ error: "Chat not found" });
+    }
+
+    let markedAsRead = false;
+    const messagesToMarkRead = [];
+
+    chat.messages.forEach(msg => {
+      if (msg.sender.toString() !== userId && !msg.read) {
+        msg.read = true;
+        markedAsRead = true;
+        messagesToMarkRead.push(msg._id);
+      }
+    });
+
+    if (markedAsRead) {
+      await chat.save();
+
+      await Notification.updateMany(
+        { recipient: userId, chatId, type: "new_message", read: false },
+        { read: true }
+      );
+
+      try {
+        const io = getIO();
+        io.to(`chat_${chatId}`).emit("messages_read", {
+          userId,
+          chatId,
+          messageIds: messagesToMarkRead,
+          readBy: userId
+        });
+      } catch (socketError) {
+        console.log("Socket.io not available for read receipts");
+      }
+    }
+
+    res.json({ message: "Chat marked as read", markedAsRead });
+  } catch (error) {
+    console.error("Mark chat as read error:", error);
+    res.status(500).json({ error: "Failed to mark chat as read" });
+  }
+};

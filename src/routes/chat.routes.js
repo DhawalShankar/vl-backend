@@ -9,7 +9,8 @@ import {
   deleteChat,
   reportUser,
   updateTranslationSettings,
-  pronounceMessage   // ✅ ADD THIS
+  pronounceMessage,
+  markChatAsRead 
 } from "../controllers/chat.controller.js";
 import { protect } from "../middlewares/auth.middleware.js";
 
@@ -24,5 +25,6 @@ router.delete("/:chatId", protect, deleteChat);
 router.post("/:chatId/report", protect, reportUser);
 router.put("/translation-settings", protect, updateTranslationSettings);
 router.get("/:chatId/message/:messageId/pronounce", protect, pronounceMessage);
+router.post("/:chatId/read", protect, markChatAsRead);  
 
 export default router;
