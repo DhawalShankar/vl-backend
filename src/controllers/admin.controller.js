@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import Chat from '../models/Chat.js';
 import Match from '../models/Match.js';
 import Report from '../models/Report.js';
+import Notification from '../models/Notification.js';
 
 // ✅ Get all reports (admin only)
 export const getReports = async (req, res) => {
@@ -114,6 +115,74 @@ export const getReportById = async (req, res) => {
     });
   }
 };
+
+// ✅ NEW: Reset connection between two users — deletes their Match + Chat
+// so they can match and start chatting again from scratch.
+export const resetConnection = async (req, res) => {
+  try {
+    const { userId1, userId2 } = req.params;
+
+    if (!userId1 || !userId2) {
+      return res.status(400).json({
+        success: false,
+        error: "Both user IDs are required"
+      });
+    }
+
+    // 1. Find + delete any Match doc(s) between these two users, either order.
+    //    Grab the IDs first so we can precisely clean up their notifications.
+    const matches = await Match.find({
+      $or: [
+        { user1: userId1, user2: userId2 },
+        { user1: userId2, user2: userId1 }
+      ]
+    }).select('_id');
+    const matchIds = matches.map(m => m._id);
+
+    const matchResult = await Match.deleteMany({ _id: { $in: matchIds } });
+
+    // 2. Delete the Chat between them (participants array is order-agnostic)
+    const chat = await Chat.findOneAndDelete({
+      participants: { $all: [userId1, userId2] }
+    });
+
+    // 3. Delete notifications tied to the deleted match(es)/chat specifically,
+    //    plus any match/message notifications exchanged directly between
+    //    these two users (covers cases where matchId/chatId wasn't set).
+    const notifOr = [
+      { sender: userId1, recipient: userId2 },
+      { sender: userId2, recipient: userId1 }
+    ];
+    if (matchIds.length) notifOr.push({ matchId: { $in: matchIds } });
+    if (chat) notifOr.push({ chatId: chat._id });
+
+    const notifResult = await Notification.deleteMany({
+      $or: notifOr,
+      type: { $in: ['match_request', 'match_accepted', 'match_rejected', 'new_message'] }
+    });
+
+    console.log(
+      `🔄 Admin reset connection between ${userId1} and ${userId2} — ` +
+      `${matchResult.deletedCount} match(es), chat deleted: ${!!chat}, ` +
+      `${notifResult.deletedCount} notification(s)`
+    );
+
+    res.json({
+      success: true,
+      message: "Connection reset successfully — users can match and chat again",
+      matchesDeleted: matchResult.deletedCount,
+      chatDeleted: !!chat,
+      notificationsDeleted: notifResult.deletedCount
+    });
+  } catch (error) {
+    console.error("Reset connection error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to reset connection"
+    });
+  }
+};
+
 // ✅ Get all jobs (including expired)
 export const getAllJobs = async (req, res) => {
   try {
