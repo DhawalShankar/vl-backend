@@ -11,7 +11,8 @@ import {
   deleteReport,
   deleteAllReports,
   getReportById,
-  resetConnection    // ✅ NEW
+  resetConnection,
+  getAllMatches
 } from '../controllers/admin.controller.js';
 import { protect } from '../middlewares/auth.middleware.js';
 import { adminOnly } from '../middlewares/admin.middleware.js';
@@ -36,5 +37,6 @@ router.delete('/connections/:userId1/:userId2', protect, adminOnly, resetConnect
 
 router.put('/jobs/:jobId/extend', protect, adminOnly, extendJobDuration);
 router.delete('/jobs/:jobId', protect, adminOnly, deleteAnyJob);
+router.get('/matches', protect, adminOnly, getAllMatches); 
 
 export default router;

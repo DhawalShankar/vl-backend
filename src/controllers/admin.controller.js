@@ -116,6 +116,46 @@ export const getReportById = async (req, res) => {
   }
 };
 
+// ✅ NEW: Get all matches that ever existed, with both users populated
+export const getAllMatches = async (req, res) => {
+  try {
+    const matches = await Match.find()
+      .populate('user1', 'name email')
+      .populate('user2', 'name email')
+      .sort({ createdAt: -1 });
+
+    // For each match, check if an active Chat exists between the two users
+    // (cheap N+1 here is fine — admin list, not a hot path)
+    const matchesWithChatInfo = await Promise.all(
+      matches.map(async (match) => {
+        const chatExists = await Chat.exists({
+          participants: { $all: [match.user1._id, match.user2._id] }
+        });
+        return {
+          _id: match._id,
+          user1: match.user1,
+          user2: match.user2,
+          status: match.status,
+          createdAt: match.createdAt,
+          hasChat: !!chatExists
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      matches: matchesWithChatInfo,
+      count: matchesWithChatInfo.length
+    });
+  } catch (error) {
+    console.error("Get all matches error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch matches"
+    });
+  }
+};
+
 // ✅ NEW: Reset connection between two users — deletes their Match + Chat
 // so they can match and start chatting again from scratch.
 export const resetConnection = async (req, res) => {
