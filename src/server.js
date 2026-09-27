@@ -11,6 +11,7 @@ import authRoutes from "./routes/auth.routes.js";
 import jobRoutes from "./routes/job.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import { initializeJobSchedulers } from "./utils/jobScheduler.js";
+import learnRoutes from "./routes/learn.routes.js";
 import adminRoutes from "./routes/admin.routes.js"
 
 dotenv.config();
@@ -56,7 +57,8 @@ app.use("/matches", matchRoutes);
 app.use("/chats", chatRoutes);
 app.use("/notifications", notificationRoutes);
 app.use("/jobs", jobRoutes);
-app.use("/admin", adminRoutes);  // ← ADD THIS
+app.use("/admin", adminRoutes); 
+app.use("/learn", learnRoutes);
 // Health check endpoint
 app.get("/", (req, res) => {
   res.json({ message: "VartaLang API is running" });
