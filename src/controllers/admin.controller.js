@@ -1,4 +1,5 @@
 // src/controllers/admin.controller.js
+import mongoose from 'mongoose';
 import Job from '../models/Job.js';
 import User from '../models/User.js';
 import Chat from '../models/Chat.js';
@@ -123,12 +124,9 @@ export const getAllMatches = async (req, res) => {
       .populate('user2', 'name email')
       .sort({ createdAt: -1 });
 
-    // FIX: skip orphaned matches whose user was deleted (populate returns null).
-    // Without this, match.user1._id below throws and the endpoint returns 500.
+    // Skip orphaned matches whose user was deleted (populate returns null).
     const validMatches = matches.filter((m) => m.user1 && m.user2);
 
-    // For each match, check if an active Chat exists between the two users
-    // (cheap N+1 here is fine — admin list, not a hot path)
     const matchesWithChatInfo = await Promise.all(
       validMatches.map(async (match) => {
         const chatExists = await Chat.exists({
@@ -159,8 +157,14 @@ export const getAllMatches = async (req, res) => {
   }
 };
 
-// ✅ Reset connection between two users — deletes their Match + Chat
-// so they can match and start chatting again from scratch.
+// ✅ Reset connection between two users — full cleanup:
+//   1. Match record(s)            (both user orders)
+//   2. Chat + its messages        (messages are embedded in the Chat doc)
+//   3. Notifications              (tied to the match(es), the chat, or sent
+//                                  directly between the two users)
+//   4. totalConnections counters  (decremented for both users, never below 0)
+// Reports are intentionally KEPT: they are the admin's evidence and are
+// reviewed/deleted separately from the Reports tab.
 export const resetConnection = async (req, res) => {
   try {
     const { userId1, userId2 } = req.params;
@@ -172,42 +176,81 @@ export const resetConnection = async (req, res) => {
       });
     }
 
-    // 1. Find + delete any Match doc(s) between these two users, either order.
-    //    Grab the IDs first so we can precisely clean up their notifications.
+    if (!mongoose.isValidObjectId(userId1) || !mongoose.isValidObjectId(userId2)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid user ID"
+      });
+    }
+
+    if (userId1 === userId2) {
+      return res.status(400).json({
+        success: false,
+        error: "User IDs must be different"
+      });
+    }
+
+    // 1. Find the match doc(s) between the two users (either order).
+    //    Keep the ids + statuses so we can clean up notifications precisely
+    //    and know how many real connections to subtract from the counters.
     const matches = await Match.find({
       $or: [
         { user1: userId1, user2: userId2 },
         { user1: userId2, user2: userId1 }
       ]
-    }).select('_id');
-    const matchIds = matches.map(m => m._id);
+    }).select('_id status');
 
-    const matchResult = await Match.deleteMany({ _id: { $in: matchIds } });
+    const matchIds = matches.map((m) => m._id);
+    const acceptedCount = matches.filter((m) => m.status === 'accepted').length;
 
-    // 2. Delete the Chat between them (participants array is order-agnostic)
+    // 2. Delete the chat (this also removes its embedded messages)
     const chat = await Chat.findOneAndDelete({
       participants: { $all: [userId1, userId2] }
     });
+    const messagesDeleted = chat?.messages?.length ?? 0;
 
-    // 3. Delete notifications tied to the deleted match(es)/chat specifically,
-    //    plus any match/message notifications exchanged directly between
-    //    these two users (covers cases where matchId/chatId wasn't set).
+    // 3. Delete the matches
+    const matchResult = await Match.deleteMany({ _id: { $in: matchIds } });
+
+    // 4. Delete every notification linked to this connection:
+    //    - anything tied to the deleted match(es) or chat (any type)
+    //    - match/message notifications exchanged directly between the users
     const notifOr = [
-      { sender: userId1, recipient: userId2 },
-      { sender: userId2, recipient: userId1 }
+      {
+        type: { $in: ['match_request', 'match_accepted', 'match_rejected', 'new_message'] },
+        $or: [
+          { sender: userId1, recipient: userId2 },
+          { sender: userId2, recipient: userId1 }
+        ]
+      }
     ];
     if (matchIds.length) notifOr.push({ matchId: { $in: matchIds } });
     if (chat) notifOr.push({ chatId: chat._id });
 
-    const notifResult = await Notification.deleteMany({
-      $or: notifOr,
-      type: { $in: ['match_request', 'match_accepted', 'match_rejected', 'new_message'] }
-    });
+    const notifResult = await Notification.deleteMany({ $or: notifOr });
+
+    // 5. Fix connection counters. Only accepted matches counted as connections,
+    //    so subtract exactly that many, and never go below zero.
+    let countersUpdated = 0;
+    if (acceptedCount > 0) {
+      const counterResult = await User.updateMany(
+        { _id: { $in: [userId1, userId2] } },
+        { $inc: { totalConnections: -acceptedCount } }
+      );
+      countersUpdated = counterResult.modifiedCount;
+
+      // Clamp anything that went negative back to 0
+      await User.updateMany(
+        { _id: { $in: [userId1, userId2] }, totalConnections: { $lt: 0 } },
+        { $set: { totalConnections: 0 } }
+      );
+    }
 
     console.log(
       `🔄 Admin reset connection between ${userId1} and ${userId2} — ` +
-      `${matchResult.deletedCount} match(es), chat deleted: ${!!chat}, ` +
-      `${notifResult.deletedCount} notification(s)`
+      `${matchResult.deletedCount} match(es), chat deleted: ${!!chat} ` +
+      `(${messagesDeleted} messages), ${notifResult.deletedCount} notification(s), ` +
+      `${countersUpdated} counter(s) updated`
     );
 
     res.json({
@@ -215,7 +258,9 @@ export const resetConnection = async (req, res) => {
       message: "Connection reset successfully — users can match and chat again",
       matchesDeleted: matchResult.deletedCount,
       chatDeleted: !!chat,
-      notificationsDeleted: notifResult.deletedCount
+      messagesDeleted,
+      notificationsDeleted: notifResult.deletedCount,
+      countersUpdated
     });
   } catch (error) {
     console.error("Reset connection error:", error);
@@ -335,7 +380,6 @@ export const deleteAnyJob = async (req, res) => {
 // ✅ Get platform stats
 export const getPlatformStats = async (req, res) => {
   try {
-    // Removed the unused expiredJobs query (expired is derived below)
     const [
       totalUsers,
       totalJobs,
@@ -436,7 +480,7 @@ export const getAllUsers = async (req, res) => {
     const users = await User.find()
       .sort({ createdAt: -1 })
       .select('-password')
-      .limit(500); // raised from 100 so the Users tab doesn't silently cut off
+      .limit(500);
 
     res.json({
       success: true,
