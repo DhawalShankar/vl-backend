@@ -1,6 +1,6 @@
 # VartaLang Backend 🌉
 
-The backend API and real-time server powering **VartaLang** — India's language exchange and vernacular jobs platform. This service handles authentication, language-exchange matching, real-time chat, the jobs board, notifications, and admin moderation for the [VartaLang frontend](https://vartalang.in).
+The backend API and real-time server powering **VartaLang** — India's language exchange and vernacular jobs platform. This service handles authentication, language-exchange matching, real-time chat, the jobs board, notifications, and admin moderation for the [VartaLang](https://vartalang.in).
 
 > **Status:** In production, running live for several months.
 > **Confidential:** This is a private repository. All code, architecture, and business logic described here are proprietary to Cosmo India Prakashan and are not open source.
