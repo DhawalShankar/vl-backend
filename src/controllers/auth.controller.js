@@ -1,12 +1,29 @@
 import User from "../models/User.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import { OAuth2Client } from 'google-auth-library'; // ← NAYA IMPORT
 
-const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+// ---------- helpers ----------
+const signToken = (userId, expiresIn = "7d") =>
+  jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn });
+
+// ---------- LOCAL SIGNUP ----------
 export const signup = async (req, res) => {
   try {
-    const { email, password, name, primaryLanguageToLearn, languagesKnow, state } = req.body;
+    // Only take the fields we allow (no more ...req.body spread)
+    const {
+      email,
+      password,
+      name,
+      primaryLanguageToLearn,
+      secondaryLanguageToLearn,
+      languagesKnow,
+      primaryRole,
+      state,
+      country,
+      city,
+      bio,
+      emailUpdates,
+    } = req.body;
 
     // Validation
     if (!email || !password || !name || !primaryLanguageToLearn || !state) {
@@ -32,27 +49,32 @@ export const signup = async (req, res) => {
 
     // Create user
     const user = await User.create({
-      ...req.body,
+      name,
       email: email.toLowerCase(),
       password: hashed,
-      authProvider: 'local',
+      authProvider: "local",
+      primaryLanguageToLearn,
+      secondaryLanguageToLearn,
+      languagesKnow,
+      primaryRole: primaryRole || "learner",
+      state,
+      country: country || "India",
+      city,
+      bio,
+      emailUpdates: emailUpdates !== undefined ? emailUpdates : true,
     });
 
-    // Generate token
-    const token = jwt.sign(
-      { userId: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    const token = signToken(user._id, "7d");
 
-    res.status(201).json({ 
+    res.status(201).json({
       message: "Signup successful",
       token,
+      userId: user._id.toString(), // added: frontend reads data.userId
       user: {
         id: user._id,
         name: user.name,
-        email: user.email
-      }
+        email: user.email,
+      },
     });
   } catch (error) {
     console.error("Signup error:", error);
@@ -60,6 +82,7 @@ export const signup = async (req, res) => {
   }
 };
 
+// ---------- EMAIL + PASSWORD LOGIN ----------
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -68,38 +91,31 @@ export const login = async (req, res) => {
       return res.status(400).json({ error: "Email and password are required" });
     }
 
-    // Find user
-    // Line 66 ko replace karo
-    const user = await User.findOne({ 
-      email: email.toLowerCase(),
-      authProvider: 'local' // ← YEH ADD KARO
-    });
-    if (!user) {
+    // FIX: no authProvider filter. Anyone who has a password set
+    // (local user OR Google user who added an optional password) can log in.
+    const user = await User.findOne({ email: email.toLowerCase() });
+
+    // Same generic message for "no such user" and "no password set (Google-only)"
+    if (!user || !user.password) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    // Check password
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    // Generate token
-    const token = jwt.sign(
-      { userId: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    const token = signToken(user._id, "7d");
 
-    res.json({ 
+    res.json({
       token,
       userId: user._id.toString(),
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
-        primaryRole: user.primaryRole
-      }
+        primaryRole: user.primaryRole,
+      },
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -110,7 +126,7 @@ export const login = async (req, res) => {
 export const getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).select("-password");
-    
+
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
@@ -121,34 +137,35 @@ export const getMe = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
+
 export const updateProfile = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const updates = req.body;
+    const updates = { ...req.body };
 
-    // Don't allow password or email updates through this endpoint
+    // Don't allow sensitive fields to be changed through this endpoint
     delete updates.password;
     delete updates.email;
+    delete updates.googleId;
+    delete updates.authProvider;
 
     // Validate required fields if they're being updated
     if (updates.languagesKnow && updates.languagesKnow.length === 0) {
       return res.status(400).json({ error: "At least one language is required" });
     }
 
-    // Update user
-    const user = await User.findByIdAndUpdate(
-      userId,
-      updates,
-      { new: true, runValidators: true }
-    ).select("-password");
+    const user = await User.findByIdAndUpdate(userId, updates, {
+      new: true,
+      runValidators: true,
+    }).select("-password");
 
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    res.json({ 
+    res.json({
       message: "Profile updated successfully",
-      user 
+      user,
     });
   } catch (error) {
     console.error("Update profile error:", error);
@@ -156,23 +173,21 @@ export const updateProfile = async (req, res) => {
   }
 };
 
-
-// ⬇️⬇️⬇️ NAYE GOOGLE FUNCTIONS ⬇️⬇️⬇️
-
+// ---------- GOOGLE SIGNUP ----------
 export const googleSignup = async (req, res) => {
   try {
-    const { 
-      googleAccessToken,  // ← Token name change
+    const {
+      googleAccessToken,
       name,
       email,
-      password, // ← Optional password
+      password, // optional
       primaryLanguageToLearn,
       secondaryLanguageToLearn,
       languagesKnow,
       primaryRole,
       state,
       country,
-      emailUpdates
+      emailUpdates,
     } = req.body;
 
     // Validate
@@ -180,11 +195,20 @@ export const googleSignup = async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
+    if (languagesKnow.length === 0) {
+      return res.status(400).json({ error: "Please add at least one language you know" });
+    }
+
+    // FIX: if a password is given, it must be valid (no more silent ignore)
+    if (password && password.length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters" });
+    }
+
     // Verify Google token via userinfo endpoint
-    const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    const userInfoResponse = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
       headers: { Authorization: `Bearer ${googleAccessToken}` },
     });
-    
+
     if (!userInfoResponse.ok) {
       return res.status(401).json({ error: "Invalid Google token" });
     }
@@ -199,8 +223,8 @@ export const googleSignup = async (req, res) => {
     // Check if exists
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
-      return res.status(400).json({ 
-        error: "Email already registered. Please login instead." 
+      return res.status(400).json({
+        error: "Email already registered. Please login instead.",
       });
     }
 
@@ -209,105 +233,96 @@ export const googleSignup = async (req, res) => {
       name,
       email: email.toLowerCase(),
       googleId: googleUserInfo.sub,
-      authProvider: 'google',
+      authProvider: "google",
       profilePhoto: googleUserInfo.picture,
       primaryLanguageToLearn,
       secondaryLanguageToLearn,
       languagesKnow,
-      primaryRole: primaryRole || 'learner',
+      primaryRole: primaryRole || "learner",
       state,
-      country: country || 'India',
-      emailUpdates: emailUpdates !== undefined ? emailUpdates : true
+      country: country || "India",
+      emailUpdates: emailUpdates !== undefined ? emailUpdates : true,
     };
 
-    // Optional password (for email login backup)
-    if (password && password.length >= 8) {
-      const hashed = await bcrypt.hash(password, 10);
-      userData.password = hashed;
+    // Optional password (lets the user also log in with email + password)
+    if (password) {
+      userData.password = await bcrypt.hash(password, 10);
     }
 
-    // Create user
     const user = await User.create(userData);
 
-    // Generate token
-    const token = jwt.sign(
-      { userId: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: "30d" }
-    );
+    const token = signToken(user._id, "30d");
 
-    res.status(201).json({ 
+    res.status(201).json({
       message: "Google signup successful",
       token,
       userId: user._id.toString(),
       user: {
         id: user._id,
         name: user.name,
-        email: user.email
-      }
+        email: user.email,
+      },
     });
-
   } catch (error) {
     console.error("Google signup error:", error);
     res.status(500).json({ error: "Google authentication failed" });
   }
 };
 
+// ---------- GOOGLE LOGIN ----------
 export const googleLogin = async (req, res) => {
   try {
-    const { googleAccessToken, email } = req.body; // ← Token name change
+    const { googleAccessToken } = req.body;
+
+    if (!googleAccessToken) {
+      return res.status(400).json({ error: "Google access token is required" });
+    }
 
     // Verify Google token
-    const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    const userInfoResponse = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
       headers: { Authorization: `Bearer ${googleAccessToken}` },
     });
-    
+
     if (!userInfoResponse.ok) {
       return res.status(401).json({ error: "Invalid Google token" });
     }
 
     const googleUserInfo = await userInfoResponse.json();
 
-    // Find user
-    const user = await User.findOne({ 
-      email: googleUserInfo.email.toLowerCase(),
-      authProvider: 'google' 
-    });
+    // FIX: no authProvider filter, lookup by email only
+    const user = await User.findOne({ email: googleUserInfo.email.toLowerCase() });
 
     if (!user) {
-      return res.status(404).json({ 
-        error: "Account not found. Please sign up first." 
+      return res.status(404).json({
+        error: "Account not found. Please sign up first.",
       });
     }
 
-    // Generate token
-    const token = jwt.sign(
-      { userId: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: "30d" }
-    );
+    // Link Google ID if this account doesn't have one yet
+    if (!user.googleId && googleUserInfo.sub) {
+      user.googleId = googleUserInfo.sub;
+      await user.save();
+    }
 
-    res.json({ 
+    const token = signToken(user._id, "30d");
+
+    res.json({
       token,
       userId: user._id.toString(),
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
-        primaryRole: user.primaryRole
-      }
+        primaryRole: user.primaryRole,
+      },
     });
-
   } catch (error) {
     console.error("Google login error:", error);
     res.status(500).json({ error: "Google authentication failed" });
   }
 };
 
-
-
-// Add this function with your other exports
-
+// ---------- GET USER BY ID ----------
 export const getUserById = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -317,9 +332,8 @@ export const getUserById = async (req, res) => {
       return res.status(400).json({ error: "Invalid user ID" });
     }
 
-    // Fetch user (exclude password)
     const user = await User.findById(userId).select("-password");
-    
+
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
