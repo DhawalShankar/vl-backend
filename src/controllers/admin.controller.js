@@ -12,20 +12,19 @@ export const getReports = async (req, res) => {
     const reports = await Report.find()
       .populate('reporter', 'name email')
       .populate('reportedUser', 'name email')
-      // ❌ Remove this - we only need the chatId string, not full chat object
-      // .populate('chatId')
+      // We only need the chatId string, not the full chat object
       .sort({ timestamp: -1 });
-    
-    res.json({ 
+
+    res.json({
       success: true,
       reports,
-      count: reports.length 
+      count: reports.length
     });
   } catch (error) {
     console.error("Get reports error:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: "Failed to fetch reports" 
+      error: "Failed to fetch reports"
     });
   }
 };
@@ -38,23 +37,23 @@ export const deleteReport = async (req, res) => {
     const report = await Report.findByIdAndDelete(reportId);
 
     if (!report) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        error: "Report not found" 
+        error: "Report not found"
       });
     }
 
     console.log(`🗑️ Admin deleted/reviewed report ${reportId}`);
 
-    res.json({ 
+    res.json({
       success: true,
       message: "Report reviewed and deleted successfully"
     });
   } catch (error) {
     console.error("Delete report error:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: "Failed to delete report" 
+      error: "Failed to delete report"
     });
   }
 };
@@ -66,16 +65,16 @@ export const deleteAllReports = async (req, res) => {
 
     console.log(`🗑️ Admin cleared ${result.deletedCount} reports`);
 
-    res.json({ 
+    res.json({
       success: true,
       message: `Deleted ${result.deletedCount} reports`,
       deletedCount: result.deletedCount
     });
   } catch (error) {
     console.error("Delete all reports error:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: "Failed to delete reports" 
+      error: "Failed to delete reports"
     });
   }
 };
@@ -97,26 +96,26 @@ export const getReportById = async (req, res) => {
       });
 
     if (!report) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        error: "Report not found" 
+        error: "Report not found"
       });
     }
 
-    res.json({ 
+    res.json({
       success: true,
       report
     });
   } catch (error) {
     console.error("Get report error:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: "Failed to fetch report" 
+      error: "Failed to fetch report"
     });
   }
 };
 
-// ✅ NEW: Get all matches that ever existed, with both users populated
+// ✅ Get all matches that ever existed, with both users populated
 export const getAllMatches = async (req, res) => {
   try {
     const matches = await Match.find()
@@ -124,10 +123,14 @@ export const getAllMatches = async (req, res) => {
       .populate('user2', 'name email')
       .sort({ createdAt: -1 });
 
+    // FIX: skip orphaned matches whose user was deleted (populate returns null).
+    // Without this, match.user1._id below throws and the endpoint returns 500.
+    const validMatches = matches.filter((m) => m.user1 && m.user2);
+
     // For each match, check if an active Chat exists between the two users
     // (cheap N+1 here is fine — admin list, not a hot path)
     const matchesWithChatInfo = await Promise.all(
-      matches.map(async (match) => {
+      validMatches.map(async (match) => {
         const chatExists = await Chat.exists({
           participants: { $all: [match.user1._id, match.user2._id] }
         });
@@ -156,7 +159,7 @@ export const getAllMatches = async (req, res) => {
   }
 };
 
-// ✅ NEW: Reset connection between two users — deletes their Match + Chat
+// ✅ Reset connection between two users — deletes their Match + Chat
 // so they can match and start chatting again from scratch.
 export const resetConnection = async (req, res) => {
   try {
@@ -231,16 +234,16 @@ export const getAllJobs = async (req, res) => {
       .sort({ postedDate: -1 })
       .select('-__v');
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       jobs,
-      count: jobs.length 
+      count: jobs.length
     });
   } catch (error) {
     console.error("Admin get jobs error:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: "Failed to fetch jobs" 
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch jobs"
     });
   }
 };
@@ -252,34 +255,34 @@ export const extendJobDuration = async (req, res) => {
     const { days } = req.body;
 
     if (!days || days < 1 || days > 365) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "Please provide valid number of days (1-365)" 
+      return res.status(400).json({
+        success: false,
+        error: "Please provide valid number of days (1-365)"
       });
     }
 
     const job = await Job.findById(jobId);
-    
+
     if (!job) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "Job not found" 
+      return res.status(404).json({
+        success: false,
+        error: "Job not found"
       });
     }
 
     // Extend expiry date
     const currentExpiry = new Date(job.expiryDate);
     currentExpiry.setDate(currentExpiry.getDate() + parseInt(days));
-    
+
     job.expiryDate = currentExpiry;
     job.status = 'active'; // Reactivate if expired
-    
+
     await job.save();
 
     console.log(`✅ Admin extended job ${jobId} by ${days} days`);
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: `Job extended by ${days} days`,
       job: {
         id: job._id,
@@ -291,9 +294,9 @@ export const extendJobDuration = async (req, res) => {
     });
   } catch (error) {
     console.error("Extend job error:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: "Failed to extend job" 
+    res.status(500).json({
+      success: false,
+      error: "Failed to extend job"
     });
   }
 };
@@ -304,11 +307,11 @@ export const deleteAnyJob = async (req, res) => {
     const { jobId } = req.params;
 
     const job = await Job.findById(jobId);
-    
+
     if (!job) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "Job not found" 
+      return res.status(404).json({
+        success: false,
+        error: "Job not found"
       });
     }
 
@@ -316,15 +319,15 @@ export const deleteAnyJob = async (req, res) => {
 
     console.log(`🗑️  Admin deleted job: ${job.title}`);
 
-    res.json({ 
-      success: true, 
-      message: "Job deleted successfully" 
+    res.json({
+      success: true,
+      message: "Job deleted successfully"
     });
   } catch (error) {
     console.error("Admin delete job error:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: "Failed to delete job" 
+    res.status(500).json({
+      success: false,
+      error: "Failed to delete job"
     });
   }
 };
@@ -332,11 +335,11 @@ export const deleteAnyJob = async (req, res) => {
 // ✅ Get platform stats
 export const getPlatformStats = async (req, res) => {
   try {
+    // Removed the unused expiredJobs query (expired is derived below)
     const [
       totalUsers,
       totalJobs,
       activeJobs,
-      expiredJobs,
       learners,
       teachers,
       totalMatches,
@@ -345,7 +348,6 @@ export const getPlatformStats = async (req, res) => {
       User.countDocuments(),
       Job.countDocuments(),
       Job.countDocuments({ status: 'active', expiryDate: { $gt: new Date() } }),
-      Job.countDocuments({ status: 'expired' }),
       User.countDocuments({ primaryRole: 'learner' }),
       User.countDocuments({ primaryRole: 'teacher' }),
       Match.countDocuments(),
@@ -390,9 +392,9 @@ export const getPlatformStats = async (req, res) => {
     });
   } catch (error) {
     console.error("Platform stats error:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: "Failed to fetch stats" 
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch stats"
     });
   }
 };
@@ -401,18 +403,18 @@ export const getPlatformStats = async (req, res) => {
 export const checkAdminStatus = async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).select('email name');
-    
+
     if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        isAdmin: false 
+      return res.status(404).json({
+        success: false,
+        isAdmin: false
       });
     }
 
     const isAdmin = user.email.toLowerCase() === 'cosmoindiaprakashan@gmail.com';
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       isAdmin,
       user: isAdmin ? {
         name: user.name,
@@ -421,9 +423,9 @@ export const checkAdminStatus = async (req, res) => {
     });
   } catch (error) {
     console.error("Admin check error:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: "Server error" 
+    res.status(500).json({
+      success: false,
+      error: "Server error"
     });
   }
 };
@@ -434,7 +436,7 @@ export const getAllUsers = async (req, res) => {
     const users = await User.find()
       .sort({ createdAt: -1 })
       .select('-password')
-      .limit(100); // Limit for performance
+      .limit(500); // raised from 100 so the Users tab doesn't silently cut off
 
     res.json({
       success: true,
