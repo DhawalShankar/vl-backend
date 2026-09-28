@@ -64,7 +64,7 @@ const translateWithSarvam = async (text, targetLang) => {
         source_language_code: "auto",
         target_language_code: targetLang,
         model: "mayura:v1",
-        mode: "modern-colloquial"
+        mode: "formal"
       }),
       signal: controller.signal
     });
