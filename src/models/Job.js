@@ -1,5 +1,7 @@
-// models/Job.js - FIXED VERSION
+// models/Job.js
 import mongoose from "mongoose";
+
+const CLEANUP_AFTER_SECONDS = 60 * 60 * 24 * 30; // delete 30 days after expiry
 
 const jobSchema = new mongoose.Schema(
   {
@@ -25,7 +27,7 @@ const jobSchema = new mongoose.Schema(
       enum: ["translation", "teaching", "interpretation", "content", "assistance", "research", "other"],
       default: "other"
     },
-    // ✅ SALARY FIELDS
+    // SALARY FIELDS
     salaryMin: {
       type: Number,
       min: 0
@@ -100,9 +102,10 @@ const jobSchema = new mongoose.Schema(
       default: Date.now,
       immutable: true
     },
+    // NOTE: no `index: true` here. The TTL index below covers expiryDate,
+    // and declaring two indexes on the same key causes IndexOptionsConflict.
     expiryDate: {
-      type: Date,
-      index: true
+      type: Date
     },
     status: {
       type: String,
@@ -129,6 +132,11 @@ jobSchema.index({ jobType: 1, status: 1 });
 jobSchema.index({ status: 1, postedDate: -1 });
 jobSchema.index({ postedBy: 1, status: 1 });
 
+// ✅ AUTO-DELETE: MongoDB itself removes a job 30 days after its expiryDate.
+// Runs inside the database, so it works even when the server is asleep.
+// Extending a job (changing expiryDate) automatically restarts the countdown.
+jobSchema.index({ expiryDate: 1 }, { expireAfterSeconds: CLEANUP_AFTER_SECONDS });
+
 // Text index with language override prevention
 jobSchema.index({
   title: "text",
@@ -149,7 +157,7 @@ jobSchema.virtual("isExpired").get(function () {
   return new Date() > this.expiryDate;
 });
 
-/* Middleware - FIXED: Remove next() callback when using async/await */
+/* Middleware */
 jobSchema.pre("save", async function () {
   // Set expiry date for new jobs
   if (this.isNew && !this.expiryDate) {
@@ -157,13 +165,13 @@ jobSchema.pre("save", async function () {
     d.setDate(d.getDate() + 7);
     this.expiryDate = d;
   }
-  
+
   // Mark as expired if past expiry date
   if (this.isExpired) {
     this.status = "expired";
   }
 
-  // ✅ Validate salary range - throw error instead of calling next()
+  // Validate salary range
   if (this.salaryMin && this.salaryMax && this.salaryMin > this.salaryMax) {
     throw new Error('Minimum salary cannot be greater than maximum salary');
   }

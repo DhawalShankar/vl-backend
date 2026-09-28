@@ -12,7 +12,7 @@ import jobRoutes from "./routes/job.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import { initializeJobSchedulers } from "./utils/jobScheduler.js";
 import learnRoutes from "./routes/learn.routes.js";
-import adminRoutes from "./routes/admin.routes.js"
+import adminRoutes from "./routes/admin.routes.js";
 
 dotenv.config();
 
@@ -21,7 +21,7 @@ const server = http.createServer(app);
 
 // Initialize Socket.IO
 initializeSocket(server);
-initializeJobSchedulers();
+
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173", // Add your local frontend
@@ -48,7 +48,13 @@ app.use(express.json());
 // MongoDB connection
 mongoose
   .connect(process.env.MONGODB_URI)
-  .then(() => console.log("✅ MongoDB connected"))
+  .then(() => {
+    console.log("✅ MongoDB connected");
+    // FIX: start schedulers only AFTER the DB is connected, so the
+    // startup catch-up run (expire + cleanup) never runs against a
+    // connection that isn't ready yet.
+    initializeJobSchedulers();
+  })
   .catch((err) => console.error("❌ MongoDB connection error:", err));
 
 // Routes
@@ -57,8 +63,9 @@ app.use("/matches", matchRoutes);
 app.use("/chats", chatRoutes);
 app.use("/notifications", notificationRoutes);
 app.use("/jobs", jobRoutes);
-app.use("/admin", adminRoutes); 
+app.use("/admin", adminRoutes);
 app.use("/learn", learnRoutes);
+
 // Health check endpoint
 app.get("/", (req, res) => {
   res.json({ message: "VartaLang API is running" });
@@ -73,8 +80,6 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 4000;
 
 server.listen(PORT, () => {
-  // ❌ WRONG: console.log`🚀 Backend running on port ${PORT}`;
-  // ✅ CORRECT:
   console.log(`🚀 Backend running on port ${PORT}`);
   console.log(`🔌 Socket.IO ready for connections`);
 });
