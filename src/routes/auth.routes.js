@@ -1,9 +1,8 @@
 import { Router } from "express";
 import { signup, login, getMe, updateProfile,  googleSignup, 
-  googleLogin, getUserById
+  googleLogin, getUserById, forgotPassword, resetPassword
 } from "../controllers/auth.controller.js";
 import { protect } from "../middlewares/auth.middleware.js";
-import { forgotPassword, resetPassword } from "../controllers/authController.js"; // apna path/name
 
 
 const router = Router();
