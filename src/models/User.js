@@ -43,7 +43,9 @@ const UserSchema = new mongoose.Schema({
   // (see chat.controller.js), so no language field is stored here.
   translationPreference: {
     enabled: { type: Boolean, default: false }
-  }
+  },
+  resetTokenHash: { type: String },
+  resetTokenExpiry: { type: Date }
 });
 
 export default mongoose.model("User", UserSchema);
