@@ -1,54 +1,28 @@
 // src/utils/translate.js
 //
-// Pluggable translation layer with two backends:
-//   - "sarvam"  -> Sarvam AI /translate (mayura:v1) — best for Indic languages,
-//                  auto source-language detection, colloquial tone for chat
-//   - "google"  -> Google Cloud Translation API v2 — wider language coverage,
-//                  useful as a fallback for languages Sarvam doesn't cover
+// Translation layer with two backends: "sarvam" (default) and "google".
+// Never blocks message sending: any failure returns null and the caller
+// just shows the original text.
 //
-// Pick the active provider with TRANSLATION_PROVIDER in .env
-// ("sarvam" or "google"). Defaults to "sarvam" since VartaLang's user base
-// is primarily Indian-language speakers and Sarvam is purpose-built for that.
-//
-// Design goal for BOTH providers: NEVER block message sending. Any failure
-// here (missing key, network error, quota, bad language pair) returns null,
-// and the caller just falls back to sending the original, untranslated text.
-//
-// Target language codes: store these on User.translationPreference.language
-// in Sarvam's BCP-47 form, e.g. "hi-IN", "ta-IN", "bn-IN", "en-IN". When the
-// Google provider is active, the "-IN" suffix is stripped automatically
-// (Google's codes are plain "hi", "ta", "bn", "en").
+// Sarvam flow:
+//   1. mayura:v1 with source_language_code "auto"   (fast, 11 languages)
+//   2. If Sarvam answers 422 (e.g. Sanskrit, which mayura can't detect)
+//      AND we know the language both users matched on, retry once with
+//      sarvam-translate:v1 and that explicit source code (22 languages).
 
 const TRANSLATION_PROVIDER = (process.env.TRANSLATION_PROVIDER || "sarvam").toLowerCase();
 
 const SARVAM_API_KEY = process.env.SARVAM_API_KEY;
 const SARVAM_TRANSLATE_URL = "https://api.sarvam.ai/translate";
 const SARVAM_MAX_CHARS = 1000; // mayura:v1 input limit
+const SARVAM_TIMEOUT_MS = 10000;
 
 const GOOGLE_TRANSLATE_API_KEY = process.env.GOOGLE_TRANSLATE_API_KEY;
 const GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2";
-
-/**
- * Sarvam AI translation — mayura:v1, auto source detection, colloquial mode.
- * Best for the 11 major Indic languages + English; use sarvam-translate:v1
- * instead (swap the `model` below) if you need the full 22-language set
- * (Bodo, Dogri, Maithili, Manipuri, Santali, etc.) — that model is tuned for
- * formal/document text rather than chat, though.
- */
-const SARVAM_TIMEOUT_MS = 10000;
 const GOOGLE_TIMEOUT_MS = 10000;
 
-const translateWithSarvam = async (text, targetLang) => {
-  if (!SARVAM_API_KEY) {
-    console.warn("⚠️ SARVAM_API_KEY not set — skipping translation");
-    return null;
-  }
-
-  if (text.length > SARVAM_MAX_CHARS) {
-    console.warn(`⚠️ Message exceeds Sarvam's ${SARVAM_MAX_CHARS}-char limit — skipping translation`);
-    return null;
-  }
-
+// One Sarvam call. Never throws; returns { ok, status, translatedText?, detectedLang? }
+const callSarvam = async ({ text, sourceLang, targetLang, model }) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SARVAM_TIMEOUT_MS);
 
@@ -61,9 +35,9 @@ const translateWithSarvam = async (text, targetLang) => {
       },
       body: JSON.stringify({
         input: text,
-        source_language_code: "auto",
+        source_language_code: sourceLang,
         target_language_code: targetLang,
-        model: "mayura:v1",
+        model,
         mode: "formal"
       }),
       signal: controller.signal
@@ -71,17 +45,16 @@ const translateWithSarvam = async (text, targetLang) => {
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error("Sarvam translation error:", response.status, errText);
-      return null;
+      console.error(`Sarvam translation error (${model}):`, response.status, errText.slice(0, 200));
+      return { ok: false, status: response.status };
     }
 
     const data = await response.json();
-
-    if (!data?.translated_text) {
-      return null;
-    }
+    if (!data?.translated_text) return { ok: false, status: 200 };
 
     return {
+      ok: true,
+      status: 200,
       translatedText: data.translated_text,
       detectedLang: data.source_language_code || null
     };
@@ -91,10 +64,54 @@ const translateWithSarvam = async (text, targetLang) => {
     } else {
       console.error("Sarvam translation request failed:", error);
     }
-    return null;
+    return { ok: false, status: 0 };
   } finally {
     clearTimeout(timeout);
   }
+};
+
+const translateWithSarvam = async (text, targetLang, fallbackSourceLang) => {
+  if (!SARVAM_API_KEY) {
+    console.warn("⚠️ SARVAM_API_KEY not set — skipping translation");
+    return null;
+  }
+
+  if (text.length > SARVAM_MAX_CHARS) {
+    console.warn(`⚠️ Message exceeds ${SARVAM_MAX_CHARS}-char limit — skipping translation`);
+    return null;
+  }
+
+  // Step 1: mayura + auto-detect
+  const first = await callSarvam({
+    text,
+    sourceLang: "auto",
+    targetLang,
+    model: "mayura:v1"
+  });
+  if (first.ok) {
+    return { translatedText: first.translatedText, detectedLang: first.detectedLang };
+  }
+
+  // Step 2: only on 422, and only if we have a usable fallback source
+  if (first.status !== 422 || !fallbackSourceLang || fallbackSourceLang === targetLang) {
+    return null;
+  }
+
+  console.log(`↩️ Auto-detect failed, retrying with sarvam-translate (source ${fallbackSourceLang})`);
+  const second = await callSarvam({
+    text,
+    sourceLang: fallbackSourceLang,
+    targetLang,
+    model: "sarvam-translate:v1"
+  });
+  if (second.ok) {
+    return {
+      translatedText: second.translatedText,
+      detectedLang: second.detectedLang || fallbackSourceLang
+    };
+  }
+
+  return null;
 };
 
 const translateWithGoogle = async (text, targetLang) => {
@@ -129,9 +146,7 @@ const translateWithGoogle = async (text, targetLang) => {
     const data = await response.json();
     const translation = data?.data?.translations?.[0];
 
-    if (!translation?.translatedText) {
-      return null;
-    }
+    if (!translation?.translatedText) return null;
 
     return {
       translatedText: translation.translatedText,
@@ -150,21 +165,17 @@ const translateWithGoogle = async (text, targetLang) => {
 };
 
 /**
- * Translate `text` into `targetLang` using whichever provider is configured.
- * @param {string} text - original message text
- * @param {string} targetLang - BCP-47 code, e.g. "hi-IN", "ta-IN", "en-IN"
- * @returns {Promise<{ translatedText: string, detectedLang: string|null } | null>}
- *          null means "could not translate, use original text instead"
+ * @param {string} text
+ * @param {string} targetLang - BCP-47, e.g. "hi-IN"
+ * @param {string|null} fallbackSourceLang - BCP-47 of the language both users
+ *        matched on; used only if Sarvam auto-detect fails
  */
-export const translateMessage = async (text, targetLang) => {
-  if (!text || !text.trim() || !targetLang) {
-    return null;
-  }
+export const translateMessage = async (text, targetLang, fallbackSourceLang = null) => {
+  if (!text || !text.trim() || !targetLang) return null;
 
   if (TRANSLATION_PROVIDER === "google") {
     return translateWithGoogle(text.trim(), targetLang);
   }
 
-  // Default: sarvam
-  return translateWithSarvam(text.trim(), targetLang);
+  return translateWithSarvam(text.trim(), targetLang, fallbackSourceLang);
 };

@@ -1,18 +1,16 @@
 // chat.controller.js
 import Chat from "../models/Chat.js";
 import User from "../models/User.js";
-import Notification from "../models/Notification.js"; // ✅ Import Notification model
+import Notification from "../models/Notification.js";
 import { getIO, emitToChat } from "../socket.js";
-import Report from "../models/Report.js"; // Create Report model
-import { translateMessage } from "../utils/translate.js"; // ✅ NEW: translation plugin
-import { getLanguageCode } from "../utils/languageCodes.js"; // ✅ NEW: language name -> BCP-47 code
-import { synthesizeSpeech } from "../utils/tts.js"; // new file, mirrors translate.js
+import Report from "../models/Report.js";
+import { translateMessage } from "../utils/translate.js";
+import { getLanguageCode } from "../utils/languageCodes.js";
+import { synthesizeSpeech } from "../utils/tts.js";
 
 
-// ✅ NEW: when a recipient knows more than one language, translate into
-// whichever one they're most fluent in. Matches the actual enum on User
-// (languagesKnow.fluency: 'Beginner' | 'Intermediate' | 'Advanced' | 'Native').
-// Falls back to the first entry they added if fluency is missing/unrecognized.
+// When a recipient knows more than one language, translate into
+// whichever one they're most fluent in.
 const FLUENCY_RANK = { native: 3, advanced: 2, intermediate: 1, beginner: 0 };
 
 const pickTargetLanguage = (languagesKnow = []) => {
@@ -29,19 +27,62 @@ const pickTargetLanguage = (languagesKnow = []) => {
 
 const MAX_TRANSLATION_BACKFILL = 30; // cap per fetch so a huge history doesn't hammer the API
 
-// Translates one message for whoever didn't send it (the fixed "recipient"
-// of that message). Returns null if translation isn't applicable/needed.
+// Message ids we already tried (failed) or skipped (same language). Stops
+// getChatMessages from re-calling the API for them on every chat open.
+// In-memory: resets on server restart, which is fine.
+const handledTranslations = new Set();
+const markHandled = (id) => {
+  if (!id) return;
+  if (handledTranslations.size > 5000) handledTranslations.clear();
+  handledTranslations.add(id);
+};
+
+// Language both users matched on: something the sender knows that the
+// recipient is learning. Recipient's primary learning language wins.
+const pickFallbackSource = (sender, recipient) => {
+  const senderKnown = new Set(
+    (sender?.languagesKnow || []).map((l) => (l.language || "").trim().toLowerCase())
+  );
+  const learning = [
+    recipient?.primaryLanguageToLearn,
+    recipient?.secondaryLanguageToLearn
+  ].filter(Boolean);
+
+  for (const lang of learning) {
+    if (senderKnown.has(lang.trim().toLowerCase())) {
+      const code = getLanguageCode(lang);
+      if (code) return code;
+    }
+  }
+  return null;
+};
+
+// Translates one message for whoever didn't send it. Returns null if
+// translation isn't applicable/needed/possible.
 const translateOneMessage = async (message, chat) => {
+  const msgId = message._id?.toString();
+  if (msgId && handledTranslations.has(msgId)) return null;
+
+  const sender = chat.participants.find(
+    (p) => p._id.toString() === message.sender.toString()
+  );
   const recipient = chat.participants.find(
-    p => p._id.toString() !== message.sender.toString()
+    (p) => p._id.toString() !== message.sender.toString()
   );
   if (!recipient?.translationPreference?.enabled) return null;
 
   const targetLang = pickTargetLanguage(recipient.languagesKnow);
   if (!targetLang) return null;
 
-  const result = await translateMessage(message.text, targetLang);
-  if (!result?.translatedText || result.detectedLang === targetLang) return null;
+  const fallbackSource = pickFallbackSource(sender, recipient);
+
+  const result = await translateMessage(message.text, targetLang, fallbackSource);
+
+  // Failed, or message is already in the target language: don't retry again
+  if (!result?.translatedText || result.detectedLang === targetLang) {
+    markHandled(msgId);
+    return null;
+  }
 
   return { translatedText: result.translatedText, translatedLang: targetLang };
 };
@@ -81,9 +122,7 @@ export const getMyChats = async (req, res) => {
   }
 };
 
-// ✅ NEW: turn the translation plugin on/off for the current user.
-// No language to pick — it's derived automatically from languagesKnow
-// on every incoming message.
+// Turn the translation plugin on/off for the current user.
 export const updateTranslationSettings = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -119,10 +158,14 @@ export const sendMessage = async (req, res) => {
       return res.status(400).json({ error: "Message cannot be empty" });
     }
 
+    // learning-language fields are needed for the translation fallback
     const chat = await Chat.findOne({
       _id: chatId,
       participants: userId
-    }).populate('participants', 'name email translationPreference languagesKnow');
+    }).populate(
+      'participants',
+      'name email translationPreference languagesKnow primaryLanguageToLearn secondaryLanguageToLearn'
+    );
 
     if (!chat) {
       return res.status(404).json({ error: "Chat not found" });
@@ -137,7 +180,7 @@ export const sendMessage = async (req, res) => {
     const recipientId = recipient._id.toString();
     const trimmedText = text.trim();
 
-    // ✅ No translation here anymore — always saved plain, translated after.
+    // No translation here — always saved plain, translated after.
     const newMessage = {
       sender: userId,
       text: trimmedText,
@@ -179,20 +222,19 @@ export const sendMessage = async (req, res) => {
       console.error("Socket.io error:", socketError);
     }
 
-    // ✅ NEW: Create notification for recipient
+    // Create notification for recipient
     try {
       await Notification.create({
         recipient: recipientId,
         sender: userId,
         type: "new_message",
         chatId: chatId,
-        message: trimmedText.substring(0, 100), // Store first 100 chars as preview
+        message: trimmedText.substring(0, 100),
         read: false
       });
 
       console.log(`✅ Notification created for user ${recipientId}`);
 
-      // ✅ NEW: Emit notification to recipient's personal room
       const io = getIO();
       io.to(`user_${recipientId}`).emit("new_message_notification", {
         recipientId: recipientId,
@@ -219,9 +261,9 @@ export const sendMessage = async (req, res) => {
       messageData
     });
 
-    // ✅ NEW: fire-and-forget translation, only if the recipient currently
-    // has it enabled. On success, patches the saved message in Mongo and
-    // emits a small "message_translated" event so an open chat updates live.
+    // Fire-and-forget translation, only if the recipient currently has it
+    // enabled. On success, patches the saved message in Mongo and emits a
+    // "message_translated" event so an open chat updates live.
     if (recipient?.translationPreference?.enabled) {
       translateOneMessage(savedMessage, chat)
         .then(async (translation) => {
@@ -287,7 +329,7 @@ export const getChatMessages = async (req, res) => {
     if (markedAsRead) {
       await chat.save();
 
-      // ✅ NEW: Mark notifications as read when opening chat
+      // Mark notifications as read when opening chat
       try {
         await Notification.updateMany(
           {
@@ -319,9 +361,10 @@ export const getChatMessages = async (req, res) => {
       }
     }
 
-    // ✅ NEW: backfill translations for the requesting user — covers
-    // history that predates them turning translation on, and any message
-    // whose background translation (from sendMessage) hasn't landed yet.
+    // Backfill translations for the requesting user — covers history that
+    // predates them turning translation on, and any message whose
+    // background translation hasn't landed yet. Messages that already
+    // failed/skipped are remembered in handledTranslations, so no repeat calls.
     const me = chat.participants.find(p => p._id.toString() === userId);
     if (me?.translationPreference?.enabled) {
       const untranslated = chat.messages
@@ -344,13 +387,12 @@ export const getChatMessages = async (req, res) => {
 
     const otherUser = chat.participants.find(p => p._id.toString() !== userId);
 
-    // Convert sender ObjectIds to strings
     const formattedMessages = chat.messages.map(msg => ({
       _id: msg._id.toString(),
       sender: msg.sender.toString(),
       text: msg.text,
-      translatedText: msg.translatedText || null, // ✅ NEW
-      translatedLang: msg.translatedLang || null, // ✅ NEW
+      translatedText: msg.translatedText || null,
+      translatedLang: msg.translatedLang || null,
       timestamp: msg.timestamp,
       read: msg.read
     }));
@@ -388,7 +430,6 @@ export const blockUser = async (req, res) => {
       await chat.save();
     }
 
-    // Notify via Socket.IO
     try {
       const io = getIO();
       io.to(`chat_${chatId}`).emit("user_blocked", { chatId, blockedBy: userId });
@@ -418,7 +459,6 @@ export const unblockUser = async (req, res) => {
     chat.blockedBy = chat.blockedBy.filter(id => id.toString() !== userId);
     await chat.save();
 
-    // Notify via Socket.IO
     try {
       const io = getIO();
       io.to(`chat_${chatId}`).emit("user_unblocked", { chatId, unblockedBy: userId });
@@ -448,18 +488,15 @@ export const deleteChat = async (req, res) => {
       return res.status(404).json({ error: "Chat not found" });
     }
 
-    // Add current user to deletedBy array
     if (!chat.deletedBy.includes(userId)) {
       chat.deletedBy.push(userId);
     }
 
-    // ✅ Check if both participants deleted
     const bothDeleted = chat.participants.every(participantId =>
       chat.deletedBy.some(deletedId => deletedId.toString() === participantId.toString())
     );
 
     if (bothDeleted) {
-      // ✅ Permanently delete
       await Chat.findByIdAndDelete(chatId);
       await Notification.deleteMany({ chatId: chatId });
 
@@ -470,7 +507,6 @@ export const deleteChat = async (req, res) => {
         permanentlyDeleted: true
       });
     } else {
-      // ✅ Soft delete for one user
       await chat.save();
 
       console.log(`📝 Chat ${chatId} deleted for user ${userId}`);
@@ -501,7 +537,6 @@ export const reportUser = async (req, res) => {
 
     const reportedUser = chat.participants.find(p => p._id.toString() !== userId);
 
-    // ✅ Save to database
     await Report.create({
       reporter: userId,
       reportedUser: reportedUser._id,
@@ -518,9 +553,8 @@ export const reportUser = async (req, res) => {
   }
 };
 
-// ✅ NEW: on-demand pronunciation for any message. No preference check —
-// anyone can tap it. Caches the audio URL/base64 on the message so repeat
-// taps don't re-hit the API.
+// On-demand pronunciation for any message. Caches the audio on the message
+// so repeat taps don't re-hit the API.
 export const pronounceMessage = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -540,21 +574,17 @@ export const pronounceMessage = async (req, res) => {
       return res.status(404).json({ error: "Message not found" });
     }
 
-    // Already cached — return it, no API call
     if (message.audioData) {
       return res.json({ audioData: message.audioData, audioFormat: message.audioFormat });
     }
 
-    // Pronounce whichever text is on screen for the requester: if this
-    // message has a translation and they're likely reading the translated
-    // version, prefer that — otherwise use the original text.
     const { lang } = req.query; // "original" | "translated", from frontend
     const textToSpeak = lang === "translated" && message.translatedText
       ? message.translatedText
       : message.text;
     const langCode = lang === "translated" && message.translatedLang
       ? message.translatedLang
-      : null; // null = auto-detect on the TTS side if supported, else default
+      : null;
 
     const result = await synthesizeSpeech(textToSpeak, langCode);
 
@@ -562,7 +592,6 @@ export const pronounceMessage = async (req, res) => {
       return res.status(502).json({ error: "Could not generate audio" });
     }
 
-    // Cache on the message so repeat taps are free
     message.audioData = result.audioData;
     message.audioFormat = result.audioFormat || "wav";
     await chat.save();
