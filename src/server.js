@@ -13,6 +13,7 @@ import notificationRoutes from "./routes/notification.routes.js";
 import { initializeJobSchedulers } from "./utils/jobScheduler.js";
 import learnRoutes from "./routes/learn.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
+import Match from "./models/Match.js";
 
 dotenv.config();
 
@@ -48,8 +49,24 @@ app.use(express.json());
 // MongoDB connection
 mongoose
   .connect(process.env.MONGODB_URI)
-  .then(() => {
+  .then(async () => {
     console.log("✅ MongoDB connected");
+
+    // One-time safe fix: replace old TTL index (which deleted accepted
+    // matches too) with the new partial one. Does nothing once the new
+    // index exists, so it is safe to leave in permanently.
+    try {
+      const indexes = await Match.collection.indexes();
+      const old = indexes.find((i) => i.name === "expiresAt_1");
+      if (old && !old.partialFilterExpression) {
+        await Match.collection.dropIndex("expiresAt_1");
+        console.log("🗑️ Old TTL index dropped");
+      }
+      await Match.createIndexes();
+    } catch (err) {
+      console.error("Index fix error:", err);
+    }
+
     // FIX: start schedulers only AFTER the DB is connected, so the
     // startup catch-up run (expire + cleanup) never runs against a
     // connection that isn't ready yet.
