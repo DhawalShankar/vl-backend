@@ -435,6 +435,7 @@ export const getChatMessages = async (req, res) => {
         id: chat._id,
         user: otherUser,
         messages: formattedMessages,
+        translationEnabled: Boolean(me?.translationPreference?.enabled),
         isBlocked: chat.blockedBy.some(id => idEq(id, userId))
       }
     });
