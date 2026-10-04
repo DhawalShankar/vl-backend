@@ -37,6 +37,26 @@ const markHandled = (id) => {
   handledTranslations.add(id);
 };
 
+// ---- Per-user "delete chat" helpers -------------------------------------
+// deletedBy  -> chat hidden from the user's list
+// clearedAt  -> per-user history cutoff (messages before it stay hidden,
+//               even after the chat is restored by a new message)
+const idEq = (a, b) => String(a) === String(b);
+
+const isDeletedFor = (chat, userId) =>
+  (chat.deletedBy || []).some((id) => idEq(id, userId));
+
+const getCutoff = (chat, userId) =>
+  (chat.clearedAt || []).find((c) => idEq(c.user, userId))?.at || null;
+
+const getVisibleMessages = (chat, userId) => {
+  const cutoff = getCutoff(chat, userId);
+  if (!cutoff) return chat.messages;
+  const cutoffTime = new Date(cutoff).getTime();
+  return chat.messages.filter((m) => new Date(m.timestamp).getTime() > cutoffTime);
+};
+// --------------------------------------------------------------------------
+
 // Language both users matched on: something the sender knows that the
 // recipient is learning. Recipient's primary learning language wins.
 const pickFallbackSource = (sender, recipient) => {
@@ -96,13 +116,17 @@ export const getMyChats = async (req, res) => {
       participants: userId,
       deletedBy: { $ne: userId }
     })
+    .select('-messages.audioData')
     .populate('participants', '-password')
     .sort({ lastMessage: -1 });
 
     const formattedChats = chats.map(chat => {
       const otherUser = chat.participants.find(p => p._id.toString() !== userId);
-      const lastMsg = chat.messages[chat.messages.length - 1];
-      const unreadCount = chat.messages.filter(
+
+      // only messages after this user's clear-cutoff count
+      const visible = getVisibleMessages(chat, userId);
+      const lastMsg = visible[visible.length - 1];
+      const unreadCount = visible.filter(
         msg => !msg.read && msg.sender.toString() !== userId
       ).length;
 
@@ -112,7 +136,7 @@ export const getMyChats = async (req, res) => {
         lastMessage: lastMsg?.text || '',
         timestamp: lastMsg?.timestamp || chat.createdAt,
         unread: unreadCount,
-        isBlocked: chat.blockedBy.includes(userId)
+        isBlocked: chat.blockedBy.some(id => idEq(id, userId))
       };
     });
 
@@ -163,7 +187,7 @@ export const sendMessage = async (req, res) => {
     const chat = await Chat.findOne({
       _id: chatId,
       participants: userId
-    }).populate(
+    }).select('-messages.audioData').populate(
       'participants',
       'name email translationPreference languagesKnow primaryLanguageToLearn secondaryLanguageToLearn'
     );
@@ -180,6 +204,13 @@ export const sendMessage = async (req, res) => {
     const recipient = chat.participants.find(p => p._id.toString() !== userId);
     const recipientId = recipient._id.toString();
     const trimmedText = text.trim();
+
+    // If anyone had deleted this chat, bring it back. clearedAt is left
+    // untouched, so their old history stays hidden.
+    const wasHiddenForRecipient = isDeletedFor(chat, recipientId);
+    if (chat.deletedBy.length > 0) {
+      chat.deletedBy = [];
+    }
 
     // No translation here — always saved plain, translated after.
     const newMessage = {
@@ -211,12 +242,12 @@ export const sendMessage = async (req, res) => {
 
     // Emit message via Socket.IO to the chat room
     try {
-      const io = getIO();
+      emitToChat(chatId, "receive_message", { chatId, message: messageData });
 
-      io.to(`chat_${chatId}`).emit("receive_message", {
-        chatId,
-        message: messageData
-      });
+      // Recipient had deleted the chat: tell their client to refetch the list
+      if (wasHiddenForRecipient) {
+        getIO().to(`user_${recipientId}`).emit("chat_restored", { chatId });
+      }
 
       console.log(`✅ Message emitted to chat_${chatId}:`, messageData);
     } catch (socketError) {
@@ -281,8 +312,7 @@ export const sendMessage = async (req, res) => {
           );
 
           try {
-            const io = getIO();
-            io.to(`chat_${chatId}`).emit("message_translated", {
+            emitToChat(chatId, "message_translated", {
               chatId,
               messageId: savedMessageId,
               translatedText: translation.translatedText,
@@ -309,7 +339,7 @@ export const getChatMessages = async (req, res) => {
       _id: chatId,
       participants: userId,
       deletedBy: { $ne: userId }
-    }).populate('participants', '-password');
+    }).select('-messages.audioData').populate('participants', '-password');
 
     if (!chat) {
       return res.status(404).json({ error: "Chat not found" });
@@ -348,8 +378,7 @@ export const getChatMessages = async (req, res) => {
 
       // Emit read receipt via Socket.IO
       try {
-        const io = getIO();
-        io.to(`chat_${chatId}`).emit("messages_read", {
+        emitToChat(chatId, "messages_read", {
           userId,
           chatId,
           messageIds: messagesToMarkRead,
@@ -362,13 +391,16 @@ export const getChatMessages = async (req, res) => {
       }
     }
 
+    // Only messages after this user's clear-cutoff are ever shown or translated
+    const visibleMessages = getVisibleMessages(chat, userId);
+
     // Backfill translations for the requesting user — covers history that
     // predates them turning translation on, and any message whose
     // background translation hasn't landed yet. Messages that already
     // failed/skipped are remembered in handledTranslations, so no repeat calls.
     const me = chat.participants.find(p => p._id.toString() === userId);
     if (me?.translationPreference?.enabled) {
-      const untranslated = chat.messages
+      const untranslated = visibleMessages
         .filter(msg => msg.sender.toString() !== userId && !msg.translatedText)
         .slice(-MAX_TRANSLATION_BACKFILL);
 
@@ -388,7 +420,7 @@ export const getChatMessages = async (req, res) => {
 
     const otherUser = chat.participants.find(p => p._id.toString() !== userId);
 
-    const formattedMessages = chat.messages.map(msg => ({
+    const formattedMessages = visibleMessages.map(msg => ({
       _id: msg._id.toString(),
       sender: msg.sender.toString(),
       text: msg.text,
@@ -403,7 +435,7 @@ export const getChatMessages = async (req, res) => {
         id: chat._id,
         user: otherUser,
         messages: formattedMessages,
-        isBlocked: chat.blockedBy.includes(userId)
+        isBlocked: chat.blockedBy.some(id => idEq(id, userId))
       }
     });
   } catch (error) {
@@ -426,14 +458,13 @@ export const blockUser = async (req, res) => {
       return res.status(404).json({ error: "Chat not found" });
     }
 
-    if (!chat.blockedBy.includes(userId)) {
+    if (!chat.blockedBy.some(id => idEq(id, userId))) {
       chat.blockedBy.push(userId);
       await chat.save();
     }
 
     try {
-      const io = getIO();
-      io.to(`chat_${chatId}`).emit("user_blocked", { chatId, blockedBy: userId });
+      emitToChat(chatId, "user_blocked", { chatId, blockedBy: userId });
       console.log(`✅ Block notification sent to chat_${chatId}`);
     } catch (socketError) {
       console.log("Socket.io not available for block notification");
@@ -461,8 +492,7 @@ export const unblockUser = async (req, res) => {
     await chat.save();
 
     try {
-      const io = getIO();
-      io.to(`chat_${chatId}`).emit("user_unblocked", { chatId, unblockedBy: userId });
+      emitToChat(chatId, "user_unblocked", { chatId, unblockedBy: userId });
       console.log(`✅ Unblock notification sent to chat_${chatId}`);
     } catch (socketError) {
       console.log("Socket.io not available for unblock notification");
@@ -489,9 +519,14 @@ export const deleteChat = async (req, res) => {
       return res.status(404).json({ error: "Chat not found" });
     }
 
-    if (!chat.deletedBy.includes(userId)) {
+    if (!isDeletedFor(chat, userId)) {
       chat.deletedBy.push(userId);
     }
+
+    // History cutoff: everything up to now stays hidden for this user,
+    // even if the chat comes back when the other person sends a message.
+    chat.clearedAt = (chat.clearedAt || []).filter((c) => !idEq(c.user, userId));
+    chat.clearedAt.push({ user: userId, at: new Date() });
 
     const bothDeleted = chat.participants.every(participantId =>
       chat.deletedBy.some(deletedId => deletedId.toString() === participantId.toString())
@@ -579,15 +614,9 @@ export const pronounceMessage = async (req, res) => {
       return res.json({ audioData: message.audioData, audioFormat: message.audioFormat });
     }
 
-    const { lang } = req.query; // "original" | "translated", from frontend
-    const textToSpeak = lang === "translated" && message.translatedText
-      ? message.translatedText
-      : message.text;
-    const langCode = lang === "translated" && message.translatedLang
-      ? message.translatedLang
-      : null;
-
-    const result = await synthesizeSpeech(textToSpeak, langCode);
+    // Always the original text, so one cached audio per message is always
+    // correct and the TTS API is hit at most once per message.
+    const result = await synthesizeSpeech(message.text, null);
 
     if (!result?.audioData) {
       return res.status(502).json({ error: "Could not generate audio" });
@@ -613,7 +642,7 @@ export const markChatAsRead = async (req, res) => {
       _id: chatId,
       participants: userId,
       deletedBy: { $ne: userId }
-    });
+    }).select('-messages.audioData');
 
     if (!chat) {
       return res.status(404).json({ error: "Chat not found" });
@@ -639,8 +668,7 @@ export const markChatAsRead = async (req, res) => {
       );
 
       try {
-        const io = getIO();
-        io.to(`chat_${chatId}`).emit("messages_read", {
+        emitToChat(chatId, "messages_read", {
           userId,
           chatId,
           messageIds: messagesToMarkRead,
