@@ -31,6 +31,7 @@ router.get('/reports', protect, adminOnly, getReports);
 router.get('/reports/:reportId', protect, adminOnly, getReportById);
 router.delete('/reports/:reportId', protect, adminOnly, deleteReport);
 router.delete('/reports/bulk/all', protect, adminOnly, deleteAllReports);  // Careful!
+router.get('/possible-matches', protect, adminOnly, getPossibleMatches);
 
 // ✅ NEW: Reset a match + chat connection between two users
 router.delete('/connections/:userId1/:userId2', protect, adminOnly, resetConnection);

@@ -495,3 +495,91 @@ export const getAllUsers = async (req, res) => {
     });
   }
 };
+
+// ✅ Possible matches: mutual language fit + no Match record in any status
+export const getPossibleMatches = async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
+    const norm = (s) => String(s || '').trim().toLowerCase();
+    const pairKey = (a, b) => {
+      a = String(a); b = String(b);
+      return a < b ? `${a}_${b}` : `${b}_${a}`;
+    };
+
+    const [users, matches] = await Promise.all([
+      User.find()
+        .select('name email languagesKnow primaryLanguageToLearn secondaryLanguageToLearn')
+        .lean(),
+      Match.find().select('user1 user2').lean()
+    ]);
+
+    // Pairs that already have a Match doc (pending / accepted / rejected)
+    const existing = new Set(matches.map((m) => pairKey(m.user1, m.user2)));
+
+    // Case-insensitive profiles: Map(normalized -> original name)
+    const profiles = users.map((u) => {
+      const known = new Map();
+      (u.languagesKnow || []).forEach((l) => {
+        if (l?.language) known.set(norm(l.language), l.language.trim());
+      });
+      const learn = new Map();
+      [u.primaryLanguageToLearn, u.secondaryLanguageToLearn]
+        .filter(Boolean)
+        .forEach((l) => learn.set(norm(l), l.trim()));
+      return { _id: String(u._id), name: u.name, email: u.email, known, learn };
+    });
+
+    // language -> users who know it (avoids comparing every user with every user)
+    const knowIndex = new Map();
+    for (const p of profiles) {
+      for (const k of p.known.keys()) {
+        if (!knowIndex.has(k)) knowIndex.set(k, []);
+        knowIndex.get(k).push(p);
+      }
+    }
+
+    const seen = new Set();
+    const results = [];
+
+    for (const a of profiles) {
+      for (const lang of a.learn.keys()) {
+        for (const b of knowIndex.get(lang) || []) {
+          if (a._id >= b._id) continue; // each pair only once
+          const key = pairKey(a._id, b._id);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          if (existing.has(key)) continue;
+
+          // what A can learn from B, and what B can learn from A
+          const user1Learns = [...a.learn.keys()]
+            .filter((k) => b.known.has(k))
+            .map((k) => a.learn.get(k));
+          const user2Learns = [...b.learn.keys()]
+            .filter((k) => a.known.has(k))
+            .map((k) => b.learn.get(k));
+
+          if (user1Learns.length === 0 || user2Learns.length === 0) continue;
+
+          results.push({
+            user1: { _id: a._id, name: a.name, email: a.email },
+            user2: { _id: b._id, name: b.name, email: b.email },
+            user1Learns,
+            user2Learns,
+            score: user1Learns.length + user2Learns.length
+          });
+        }
+      }
+    }
+
+    results.sort((x, y) => y.score - x.score);
+
+    res.json({
+      success: true,
+      possibleMatches: results.slice(0, limit),
+      total: results.length
+    });
+  } catch (error) {
+    console.error("Get possible matches error:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch possible matches" });
+  }
+};
