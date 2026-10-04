@@ -1,14 +1,11 @@
 // src/utils/languageCodes.js
 //
-// Maps the plain language names stored in User.languagesKnow (e.g. "Hindi",
-// "Tamil") to BCP-47 codes the translation providers expect (e.g. "hi-IN").
-//
-// Note: the default Sarvam model (mayura:v1) only supports 11 of these
-// languages + English. The rest (Assamese, Sanskrit, Nepali, Konkani,
-// Maithili, Bodo, Dogri, Kashmiri, Manipuri, Santali, Sindhi) need the
-// sarvam-translate:v1 model instead — see the comment in translate.js.
+// Maps language names stored in User.languagesKnow to codes.
+// Indian languages -> BCP-47 with -IN (Sarvam). Foreign languages -> plain
+// ISO codes (Google).
 
 const LANGUAGE_CODES = {
+  // Indian languages (Sarvam)
   english: "en-IN",
   hindi: "hi-IN",
   bengali: "bn-IN",
@@ -16,8 +13,8 @@ const LANGUAGE_CODES = {
   kannada: "kn-IN",
   malayalam: "ml-IN",
   marathi: "mr-IN",
-  odia: "or-IN",
-  oriya: "or-IN", // common alternate spelling
+  odia: "od-IN",
+  oriya: "od-IN",
   punjabi: "pa-IN",
   tamil: "ta-IN",
   telugu: "te-IN",
@@ -32,13 +29,34 @@ const LANGUAGE_CODES = {
   kashmiri: "ks-IN",
   manipuri: "mni-IN",
   santali: "sat-IN",
-  sindhi: "sd-IN"
+  sindhi: "sd-IN",
+
+  // Foreign languages (Google)
+  spanish: "es",
+  french: "fr",
+  german: "de",
+  italian: "it",
+  portuguese: "pt",
+  russian: "ru",
+  japanese: "ja",
+  korean: "ko",
+  chinese: "zh",
+  mandarin: "zh",
+  arabic: "ar",
+  turkish: "tr",
+  dutch: "nl",
+  polish: "pl",
+  swedish: "sv",
+  thai: "th",
+  vietnamese: "vi",
+  indonesian: "id",
+  persian: "fa",
+  farsi: "fa",
+  greek: "el",
+  hebrew: "he",
+  swahili: "sw"
 };
 
-/**
- * @param {string} languageName - as stored in languagesKnow, e.g. "Hindi"
- * @returns {string|null} BCP-47 code, e.g. "hi-IN", or null if unrecognized
- */
 export const getLanguageCode = (languageName) => {
   if (!languageName) return null;
   const key = languageName.trim().toLowerCase();

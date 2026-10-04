@@ -79,7 +79,8 @@ const translateOneMessage = async (message, chat) => {
   const result = await translateMessage(message.text, targetLang, fallbackSource);
 
   // Failed, or message is already in the target language: don't retry again
-  if (!result?.translatedText || result.detectedLang === targetLang) {
+  const baseLang = (c) => (c || "").split("-")[0].toLowerCase();
+  if (!result?.translatedText || baseLang(result.detectedLang) === baseLang(targetLang)) {
     markHandled(msgId);
     return null;
   }
