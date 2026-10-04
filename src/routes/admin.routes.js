@@ -12,7 +12,8 @@ import {
   deleteAllReports,
   getReportById,
   resetConnection,
-  getAllMatches
+  getAllMatches,
+  getPossibleMatches
 } from '../controllers/admin.controller.js';
 import { protect } from '../middlewares/auth.middleware.js';
 import { adminOnly } from '../middlewares/admin.middleware.js';
